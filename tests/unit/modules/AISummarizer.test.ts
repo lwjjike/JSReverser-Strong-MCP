@@ -1,9 +1,20 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import { AISummarizer } from '../../../src/modules/analyzer/AISummarizer.js';
+import type { CodeFile } from '../../../src/types/index.js';
+
+interface LLMServiceLike {
+  chat(messages: unknown[]): Promise<{ content: string } | string>;
+}
 
 describe('AISummarizer', () => {
-  const file = {
+  const file: CodeFile = {
     url: 'https://example.com/app.js',
     type: 'external' as const,
     size: 120,
@@ -24,9 +35,9 @@ describe('AISummarizer', () => {
           complexity: 'medium',
         }),
       }),
-    };
-    const s = new AISummarizer(llm as any);
-    const out = await s.summarizeFile(file as any);
+    } satisfies LLMServiceLike;
+    const s = new AISummarizer(llm as unknown as ConstructorParameters<typeof AISummarizer>[0]);
+    const out = await s.summarizeFile(file);
     assert.strictEqual(out.summary, 'desc');
     assert.strictEqual(out.purpose, 'purpose');
     assert.strictEqual(out.hasAPI, true);
@@ -37,9 +48,9 @@ describe('AISummarizer', () => {
       chat: async () => {
         throw new Error('ai down');
       },
-    };
-    const s = new AISummarizer(llm as any);
-    const out = await s.summarizeFile(file as any);
+    } satisfies LLMServiceLike;
+    const s = new AISummarizer(llm as unknown as ConstructorParameters<typeof AISummarizer>[0]);
+    const out = await s.summarizeFile(file);
     assert.strictEqual(out.summary.includes('Basic analysis'), true);
     assert.ok(Array.isArray(out.keyFunctions));
   });
@@ -55,12 +66,12 @@ describe('AISummarizer', () => {
           recommendations: ['sanitize'],
         }),
       }),
-    };
-    const s = new AISummarizer(llm as any);
-    const batch = await s.summarizeBatch([file as any, file as any], 1);
+    } satisfies LLMServiceLike;
+    const s = new AISummarizer(llm as unknown as ConstructorParameters<typeof AISummarizer>[0]);
+    const batch = await s.summarizeBatch([file, file], 1);
     assert.strictEqual(batch.length, 2);
 
-    const project = await s.summarizeProject([file as any, file as any]);
+    const project = await s.summarizeProject([file, file]);
     assert.strictEqual(project.totalFiles, 2);
     assert.strictEqual(project.architecture, 'SPA');
   });
@@ -68,10 +79,9 @@ describe('AISummarizer', () => {
   it('uses safe fallback when project JSON is invalid', async () => {
     const llm = {
       chat: async () => ({ content: 'not-json' }),
-    };
-    const s = new AISummarizer(llm as any);
-    const project = await s.summarizeProject([file as any]);
+    } satisfies LLMServiceLike;
+    const s = new AISummarizer(llm as unknown as ConstructorParameters<typeof AISummarizer>[0]);
+    const project = await s.summarizeProject([file]);
     assert.strictEqual(project.mainPurpose, 'Analysis failed');
   });
 });
-

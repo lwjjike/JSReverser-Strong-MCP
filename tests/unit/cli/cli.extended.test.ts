@@ -1,15 +1,49 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import { cliOptions, parseArguments } from '../../../src/cli.js';
+
+interface CliOptionsLike {
+  browserUrl: { coerce(value: string | undefined): string | undefined };
+  wsEndpoint: { coerce(value: string | undefined): string | undefined };
+  wsHeaders: {
+    coerce(value: string | undefined): Record<string, string> | undefined;
+  };
+  viewport: {
+    coerce(
+      value: string | undefined,
+    ): { width: number; height: number } | undefined;
+  };
+}
+
+interface ParsedArgsLike {
+  browserUrl?: string;
+  wsEndpoint?: string;
+  wsHeaders?: Record<string, string>;
+  channel?: string;
+  headless?: boolean;
+  isolated?: boolean;
+  categoryNetwork?: boolean;
+  viewport?: { width: number; height: number };
+  chromeArg?: string[];
+  experimentalDevtools?: boolean;
+  experimentalIncludeAllPages?: boolean;
+}
 
 describe('cli extended coverage', () => {
   it('validates browserUrl/wsEndpoint/wsHeaders coercion', () => {
-    const browserUrl = (cliOptions as any).browserUrl.coerce;
+    const options = cliOptions as unknown as CliOptionsLike;
+    const browserUrl = options.browserUrl.coerce;
     assert.strictEqual(browserUrl(undefined), undefined);
     assert.strictEqual(browserUrl('http://127.0.0.1:9222'), 'http://127.0.0.1:9222');
     assert.throws(() => browserUrl('not-a-url'), /not valid URL/);
 
-    const wsEndpoint = (cliOptions as any).wsEndpoint.coerce;
+    const wsEndpoint = options.wsEndpoint.coerce;
     assert.strictEqual(wsEndpoint(undefined), undefined);
     assert.strictEqual(
       wsEndpoint('ws://127.0.0.1:9222/devtools/browser/abc'),
@@ -21,7 +55,7 @@ describe('cli extended coverage', () => {
     );
     assert.throws(() => wsEndpoint('::bad::'), /not valid URL/);
 
-    const wsHeaders = (cliOptions as any).wsHeaders.coerce;
+    const wsHeaders = options.wsHeaders.coerce;
     assert.strictEqual(wsHeaders(undefined), undefined);
     assert.deepStrictEqual(wsHeaders('{"Authorization":"Bearer x"}'), {
       Authorization: 'Bearer x',
@@ -31,7 +65,8 @@ describe('cli extended coverage', () => {
   });
 
   it('validates viewport coercion', () => {
-    const viewport = (cliOptions as any).viewport.coerce;
+    const options = cliOptions as unknown as CliOptionsLike;
+    const viewport = options.viewport.coerce;
     assert.strictEqual(viewport(undefined), undefined);
     assert.deepStrictEqual(viewport('1280x720'), { width: 1280, height: 720 });
     assert.throws(() => viewport('bad-size'), /Invalid viewport/);
@@ -39,11 +74,11 @@ describe('cli extended coverage', () => {
   });
 
   it('parseArguments applies stable channel default when launch target is absent', () => {
-    const args = parseArguments('1.2.3', ['node', 'cli.js']);
-    assert.strictEqual((args as any).channel, 'stable');
-    assert.strictEqual((args as any).headless, false);
-    assert.strictEqual((args as any).isolated, false);
-    assert.strictEqual((args as any).categoryNetwork, true);
+    const args = parseArguments('1.2.3', ['node', 'cli.js']) as ParsedArgsLike;
+    assert.strictEqual(args.channel, 'stable');
+    assert.strictEqual(args.headless, false);
+    assert.strictEqual(args.isolated, false);
+    assert.strictEqual(args.categoryNetwork, true);
   });
 
   it('parseArguments keeps explicit launch target without forcing channel', () => {
@@ -52,9 +87,9 @@ describe('cli extended coverage', () => {
       'cli.js',
       '--browserUrl',
       'http://127.0.0.1:9222',
-    ]);
-    assert.strictEqual((byUrl as any).browserUrl, 'http://127.0.0.1:9222');
-    assert.strictEqual((byUrl as any).channel, undefined);
+    ]) as ParsedArgsLike;
+    assert.strictEqual(byUrl.browserUrl, 'http://127.0.0.1:9222');
+    assert.strictEqual(byUrl.channel, undefined);
 
     const byWs = parseArguments('1.2.3', [
       'node',
@@ -63,13 +98,10 @@ describe('cli extended coverage', () => {
       'ws://127.0.0.1:9222/devtools/browser/abc',
       '--wsHeaders',
       '{"Authorization":"Bearer token"}',
-    ]);
-    assert.strictEqual(
-      (byWs as any).wsEndpoint,
-      'ws://127.0.0.1:9222/devtools/browser/abc',
-    );
-    assert.deepStrictEqual((byWs as any).wsHeaders, { Authorization: 'Bearer token' });
-    assert.strictEqual((byWs as any).channel, undefined);
+    ]) as ParsedArgsLike;
+    assert.strictEqual(byWs.wsEndpoint, 'ws://127.0.0.1:9222/devtools/browser/abc');
+    assert.deepStrictEqual(byWs.wsHeaders, { Authorization: 'Bearer token' });
+    assert.strictEqual(byWs.channel, undefined);
   });
 
   it('parseArguments supports chrome args, viewport and hidden toggles', () => {
@@ -87,15 +119,15 @@ describe('cli extended coverage', () => {
       '--no-category-network',
       '--experimentalDevtools',
       '--experimentalIncludeAllPages',
-    ]);
+    ]) as ParsedArgsLike;
 
-    assert.strictEqual((parsed as any).channel, 'beta');
-    assert.strictEqual((parsed as any).headless, true);
-    assert.strictEqual((parsed as any).isolated, true);
-    assert.deepStrictEqual((parsed as any).viewport, { width: 1440, height: 900 });
-    assert.deepStrictEqual((parsed as any).chromeArg, ['--no-sandbox', '--disable-gpu']);
-    assert.strictEqual((parsed as any).categoryNetwork, false);
-    assert.strictEqual((parsed as any).experimentalDevtools, true);
-    assert.strictEqual((parsed as any).experimentalIncludeAllPages, true);
+    assert.strictEqual(parsed.channel, 'beta');
+    assert.strictEqual(parsed.headless, true);
+    assert.strictEqual(parsed.isolated, true);
+    assert.deepStrictEqual(parsed.viewport, { width: 1440, height: 900 });
+    assert.deepStrictEqual(parsed.chromeArg, ['--no-sandbox', '--disable-gpu']);
+    assert.strictEqual(parsed.categoryNetwork, false);
+    assert.strictEqual(parsed.experimentalDevtools, true);
+    assert.strictEqual(parsed.experimentalIncludeAllPages, true);
   });
 });

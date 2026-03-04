@@ -1,6 +1,96 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
+import type * as t from '@babel/types';
+
 import { CodeAnalyzer } from '../../../src/modules/analyzer/CodeAnalyzer.js';
+
+interface LLMServiceLike {
+  generateCodeAnalysisPrompt(code: string, focus: string): unknown[];
+  chat(
+    messages: unknown[],
+    options?: { temperature?: number; maxTokens?: number },
+  ): Promise<{ content: string }>;
+  generateTaintAnalysisPrompt?(
+    code: string,
+    sources: unknown[],
+    sinks: unknown[],
+    taintPaths: unknown[],
+  ): unknown[];
+}
+
+interface CodeAnalyzerTestHarness {
+  llm: LLMServiceLike;
+  understand(options: {
+    code: string;
+    focus?: string;
+    context?: Record<string, unknown>;
+  }): Promise<{
+    structure: { functions: Array<{ name: string }> };
+    techStack: { framework?: string };
+    securityRisks: unknown[];
+    qualityScore: number;
+    complexityMetrics: { cyclomaticComplexity: number };
+  }>;
+  analyzeModules(code: string): Array<{ name: string }>;
+  analyzeStructure(code: string): Promise<{ functions: Array<{ name: string }> }>;
+  buildCallGraph(
+    functions: Array<{ name: string }>,
+    code: string,
+  ): { nodes: unknown[]; edges: unknown[] };
+  aiAnalyze(code: string, focus: string): Promise<Record<string, unknown>>;
+  detectTechStack(
+    code: string,
+    aiAnalysis: Record<string, unknown>,
+  ): { framework?: string; bundler?: string; other?: string[]; cryptoLibrary?: string[] };
+  extractBusinessLogic(
+    aiAnalysis: Record<string, unknown>,
+    context?: Record<string, unknown>,
+  ): { dataModel: Record<string, unknown>; rules: string[] };
+  analyzeDataFlow(code: string): Promise<{
+    sources: unknown[];
+    sinks: unknown[];
+    graph: { nodes: unknown[] };
+    taintPaths: unknown[];
+  }>;
+  identifySecurityRisks(code: string, aiAnalysis: Record<string, unknown>): unknown[];
+  detectCodePatterns(code: string): { patterns: unknown[]; antiPatterns: unknown[] };
+  analyzeComplexityMetrics(
+    code: string,
+  ): { cyclomaticComplexity: number; maintainabilityIndex: number };
+  calculateQualityScore(
+    structure: unknown,
+    risks: unknown[],
+    aiAnalysis: Record<string, unknown>,
+    metrics: unknown,
+    antiPatterns: unknown[],
+  ): number;
+  getMemberExpressionName(node: t.MemberExpression): string;
+  checkSanitizer(node: t.CallExpression, sanitizers: Set<string>): boolean;
+  computeASTHash(node: t.Node): string;
+  normalizeCode(node: t.Node): string;
+  calculateCodeSimilarity(code1: string, code2: string): number;
+  enhanceTaintAnalysisWithLLM(
+    code: string,
+    sources: unknown[],
+    sinks: unknown[],
+    taintPaths: unknown[],
+  ): Promise<void>;
+  checkTaintedArguments(
+    args: t.Expression[],
+    taintMap: Map<string, unknown>,
+    taintPaths: unknown[],
+    sinkType: string,
+    sinkLine: number,
+  ): void;
+  detectDuplicateCode(ast: t.File): unknown[];
+  constructor: { prototype: object };
+}
 
 const richCode = `
 import x from 'libx';
@@ -25,7 +115,7 @@ function a2(){ return helper(1); }
 `;
 
 describe('CodeAnalyzer extended', () => {
-  function makeAnalyzer() {
+  function makeAnalyzer(): CodeAnalyzerTestHarness {
     const llm = {
       generateCodeAnalysisPrompt: () => [{ role: 'user', content: 'x' }],
       chat: async () => ({
@@ -36,8 +126,10 @@ describe('CodeAnalyzer extended', () => {
           qualityScore: 77,
         }),
       }),
-    };
-    return new CodeAnalyzer(llm as any) as any;
+    } satisfies LLMServiceLike;
+    return new CodeAnalyzer(
+      llm as unknown as ConstructorParameters<typeof CodeAnalyzer>[0],
+    ) as unknown as CodeAnalyzerTestHarness;
   }
 
   it('runs end-to-end understand and returns structured analysis', async () => {
@@ -94,7 +186,7 @@ describe('CodeAnalyzer extended', () => {
 
   it('covers sanitizer/memberName/duplicate/similarity helpers', () => {
     const analyzer = makeAnalyzer();
-    const t = (analyzer.constructor as any).prototype;
+    const prototypeRef = analyzer.constructor.prototype;
 
     const memberName = analyzer.getMemberExpressionName({
       type: 'MemberExpression',
@@ -120,11 +212,11 @@ describe('CodeAnalyzer extended', () => {
     assert.strictEqual(isSanitizer, true);
 
     // direct helper usage through generated AST nodes
-    const fakeNode: any = {
+    const fakeNode = {
       type: 'Identifier',
       name: 'x',
       loc: { start: { line: 1 }, end: { line: 1 } },
-    };
+    } as unknown as t.Identifier;
     const h = analyzer.computeASTHash(fakeNode);
     assert.ok(typeof h === 'string');
 
@@ -132,7 +224,7 @@ describe('CodeAnalyzer extended', () => {
       type: 'FunctionDeclaration',
       id: { type: 'Identifier', name: 'foo' },
       params: [],
-      body: { type: 'BlockStatement', body: [] },
+      body: { type: 'BlockStatement', body: [], directives: [] },
       generator: false,
       async: false,
     });
@@ -140,7 +232,7 @@ describe('CodeAnalyzer extended', () => {
 
     assert.strictEqual(analyzer.calculateCodeSimilarity('abc', 'abc'), 1);
     assert.ok(analyzer.calculateCodeSimilarity('abc', 'xyz') <= 1);
-    assert.ok(t); // keep reference used
+    assert.ok(prototypeRef);
   });
 
   it('covers fallback/error branches across analyzer methods', async () => {
@@ -148,8 +240,10 @@ describe('CodeAnalyzer extended', () => {
       generateCodeAnalysisPrompt: () => [],
       chat: async () => ({ content: 'plain text response' }),
       generateTaintAnalysisPrompt: () => [],
-    };
-    const analyzer = new CodeAnalyzer(llm as any) as any;
+    } satisfies LLMServiceLike;
+    const analyzer = new CodeAnalyzer(
+      llm as unknown as ConstructorParameters<typeof CodeAnalyzer>[0],
+    ) as unknown as CodeAnalyzerTestHarness;
 
     // aiAnalyze: raw text fallback
     const raw = await analyzer.aiAnalyze('const a=1', 'all');
@@ -253,8 +347,10 @@ ${'        doWork(12345);\n'.repeat(55)}
           ],
         }),
       }),
-    };
-    const analyzer = new CodeAnalyzer(llm as any) as any;
+    } satisfies LLMServiceLike;
+    const analyzer = new CodeAnalyzer(
+      llm as unknown as ConstructorParameters<typeof CodeAnalyzer>[0],
+    ) as unknown as CodeAnalyzerTestHarness;
     const code = `
       const input = location.href;
       const cookie = document.cookie;
@@ -291,13 +387,13 @@ ${'        doWork(12345);\n'.repeat(55)}
     await analyzer.enhanceTaintAnalysisWithLLM(code, flow.sources, flow.sinks, flow.taintPaths);
 
     // checkTaintedArguments no-op branch
-    const taintMap = new Map<string, any>();
-    const taintPaths: any[] = [];
+    const taintMap = new Map<string, unknown>();
+    const taintPaths: unknown[] = [];
     analyzer.checkTaintedArguments([{ type: 'StringLiteral', value: 'x' }], taintMap, taintPaths, 'eval', 1);
     assert.strictEqual(taintPaths.length, 0);
 
     // detectDuplicateCode catch branch
-    const dupFail = analyzer.detectDuplicateCode({} as any);
+    const dupFail = analyzer.detectDuplicateCode({} as unknown as t.File);
     assert.deepStrictEqual(dupFail, []);
   });
 });

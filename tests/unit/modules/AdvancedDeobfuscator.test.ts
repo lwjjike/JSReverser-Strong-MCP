@@ -1,10 +1,73 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import { AdvancedDeobfuscator } from '../../../src/modules/deobfuscator/AdvancedDeobfuscator.js';
+import type {
+  AdvancedDeobfuscateOptions,
+  AdvancedDeobfuscateResult,
+} from '../../../src/modules/deobfuscator/AdvancedDeobfuscator.js';
+
+interface LLMServiceLike {
+  chat(messages: unknown[]): Promise<{ content: string } | string>;
+}
+
+interface VmDetectionLike {
+  detected: boolean;
+  type: string;
+  instructionCount: number;
+}
+
+interface VmStructureLike {
+  hasInterpreter?: boolean;
+  hasStack?: boolean;
+  hasRegisters?: boolean;
+  interpreterFunction?: string;
+  instructionArray?: string;
+}
+
+interface VmResultLike {
+  success: boolean;
+  code: string;
+}
+
+interface AdvancedDeobfuscatorTestHarness {
+  detectInvisibleUnicode(code: string): boolean;
+  decodeInvisibleUnicode(code: string): string;
+  detectStringEncoding(code: string): boolean;
+  detectVMProtection(code: string): VmDetectionLike;
+  analyzeVMStructure(code: string): VmStructureLike;
+  simplifyVMCode(code: string, vmComponents: VmStructureLike): string;
+  detectControlFlowFlattening(code: string): boolean;
+  removeDeadCode(code: string): string;
+  removeOpaquePredicates(code: string): string;
+  unflattenControlFlow(code: string): Promise<string>;
+  extractCodeFromLLMResponse(response: string): string;
+  isValidJavaScript(code: string): boolean;
+  applyASTOptimizations(code: string): string;
+  calculateConfidence(
+    techniques: string[],
+    warnings: string[],
+    code: string,
+  ): number;
+  llmCleanup(code: string, techniques: string[]): Promise<string | null>;
+  deobfuscate(options: AdvancedDeobfuscateOptions): Promise<AdvancedDeobfuscateResult>;
+  deobfuscateVM(
+    code: string,
+    vmInfo: Pick<VmDetectionLike, 'type' | 'instructionCount'>,
+  ): Promise<VmResultLike>;
+  derotateStringArray(code: string): string;
+  normalizeCode(code: string): string;
+  estimateCodeComplexity(code: string): number;
+}
 
 describe('AdvancedDeobfuscator', () => {
   it('covers invisible unicode/string detection and decode helpers', () => {
-    const d = new AdvancedDeobfuscator() as any;
+    const d = new AdvancedDeobfuscator() as unknown as AdvancedDeobfuscatorTestHarness;
     const zw = '\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200c'; // 01000001 => 'A'
 
     assert.strictEqual(d.detectInvisibleUnicode(`x${zw}y`), true);
@@ -18,7 +81,7 @@ describe('AdvancedDeobfuscator', () => {
   });
 
   it('covers VM/control-flow/dead-code/opaque detection and transforms', async () => {
-    const d = new AdvancedDeobfuscator() as any;
+    const d = new AdvancedDeobfuscator() as unknown as AdvancedDeobfuscatorTestHarness;
     const vmCode = `
       while(true){ switch(op){ case 0: stack.push(1); break; case 1: stack.pop(); break; } }
       var code=[1,2,3,4,5,6,7,8,9,10,11,12];
@@ -58,7 +121,7 @@ describe('AdvancedDeobfuscator', () => {
   });
 
   it('covers code extraction/validation/ast optimization/confidence', () => {
-    const d = new AdvancedDeobfuscator() as any;
+    const d = new AdvancedDeobfuscator() as unknown as AdvancedDeobfuscatorTestHarness;
     const extracted = d.extractCodeFromLLMResponse('```javascript\nconst x = 1;\n```');
     assert.strictEqual(extracted, 'const x = 1;');
 
@@ -78,8 +141,10 @@ describe('AdvancedDeobfuscator', () => {
   it('covers llm cleanup path and full deobfuscate path', async () => {
     const llm = {
       chat: async () => ({ content: '```javascript\nconst cleaned = 1;\n```' }),
-    };
-    const d = new AdvancedDeobfuscator(llm as any) as any;
+    } satisfies LLMServiceLike;
+    const d = new AdvancedDeobfuscator(
+      llm as unknown as ConstructorParameters<typeof AdvancedDeobfuscator>[0],
+    ) as unknown as AdvancedDeobfuscatorTestHarness;
 
     const cleaned = await d.llmCleanup('const a=1;', ['string-encoding']);
     assert.strictEqual(cleaned, 'const cleaned = 1;');
@@ -97,8 +162,10 @@ describe('AdvancedDeobfuscator', () => {
   it('covers deobfuscateVM success/fallback branches', async () => {
     const llmOk = {
       chat: async () => ({ content: '```javascript\nconst vmOut = 1;\n```' }),
-    };
-    const d1 = new AdvancedDeobfuscator(llmOk as any) as any;
+    } satisfies LLMServiceLike;
+    const d1 = new AdvancedDeobfuscator(
+      llmOk as unknown as ConstructorParameters<typeof AdvancedDeobfuscator>[0],
+    ) as unknown as AdvancedDeobfuscatorTestHarness;
     const vmOk = await d1.deobfuscateVM('while(true){switch(x){case 0x1:break;}}', {
       type: 'custom-vm',
       instructionCount: 1,
@@ -108,8 +175,10 @@ describe('AdvancedDeobfuscator', () => {
 
     const llmBad = {
       chat: async () => ({ content: 'not js {{' }),
-    };
-    const d2 = new AdvancedDeobfuscator(llmBad as any) as any;
+    } satisfies LLMServiceLike;
+    const d2 = new AdvancedDeobfuscator(
+      llmBad as unknown as ConstructorParameters<typeof AdvancedDeobfuscator>[0],
+    ) as unknown as AdvancedDeobfuscatorTestHarness;
     const vmBad = await d2.deobfuscateVM('var x=1;', { type: 'custom-vm', instructionCount: 0 });
     assert.strictEqual(typeof vmBad.code, 'string');
   });
@@ -117,8 +186,10 @@ describe('AdvancedDeobfuscator', () => {
   it('covers control-flow llm branch, derotate and normalization helpers', async () => {
     const llm = {
       chat: async () => ({ content: '```js\nconst cleanFlow = 1;\n```' }),
-    };
-    const d = new AdvancedDeobfuscator(llm as any) as any;
+    } satisfies LLMServiceLike;
+    const d = new AdvancedDeobfuscator(
+      llm as unknown as ConstructorParameters<typeof AdvancedDeobfuscator>[0],
+    ) as unknown as AdvancedDeobfuscatorTestHarness;
 
     const unflattened = await d.unflattenControlFlow(
       'while(true){switch(i){case 0:i=1;break;case 1:break;}}',

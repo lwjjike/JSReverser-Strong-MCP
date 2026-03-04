@@ -1,18 +1,71 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
-import { CodeCollector } from '../../../src/modules/collector/CodeCollector.js';
-import type { PuppeteerConfig } from '../../../src/types/index.js';
+import { describe, it } from 'node:test';
 
-function makeCollector() {
-  const cfg: PuppeteerConfig = { headless: true, timeout: 2000 } as any;
+import { CodeCollector } from '../../../src/modules/collector/CodeCollector.js';
+import type { CodeFile, PuppeteerConfig } from '../../../src/types/index.js';
+
+interface BrowserLike {
+  isConnected(): boolean;
+  on(event: string, handler: () => void): void;
+}
+
+interface BrowserManagerLike {
+  getBrowser(): BrowserLike | null;
+  getCurrentPage(): object | null;
+  newPage(): Promise<object>;
+  launch(): Promise<BrowserLike>;
+  close(): Promise<void>;
+}
+
+interface CodeCollectorHarness {
+  MAX_COLLECTED_URLS: number;
+  MAX_FILES_PER_COLLECT: number;
+  collectedUrls: Set<string>;
+  collectedFilesCache: Map<string, CodeFile>;
+  waitForDynamicScripts(page: object, waitMs: number): Promise<void>;
+  cleanupCollectedUrls(): void;
+  collectInlineScripts(page: object): Promise<CodeFile[]>;
+  collectServiceWorkers(page: object): Promise<CodeFile[]>;
+  collectWebWorkers(page: { url(): string; evaluate(fn: unknown, workerUrl?: string): Promise<unknown> }): Promise<CodeFile[]>;
+  extractDependencies(code: string): string[];
+  analyzeDependencies(files: CodeFile[]): { nodes: unknown[] };
+  getFilesByPattern(
+    pattern: string,
+    limit?: number,
+    maxContentBytes?: number,
+  ): { matched: number; returned: number; files: CodeFile[] };
+  getTopPriorityFiles(
+    limit?: number,
+    maxContentBytes?: number,
+  ): { files: CodeFile[] };
+  calculatePriorityScore(file: CodeFile): number;
+  getPerformanceMetrics(page: object): Promise<Record<string, number>>;
+  collectPageMetadata(page: object): Promise<Record<string, unknown>>;
+  getCollectedFilesSummary(): Array<{ url: string }>;
+  getFileByUrl(url: string): CodeFile | null;
+  getCollectionStats(): { totalCollected: number; uniqueUrls: number };
+  clearCollectedFilesCache(): void;
+  clearCache(): void;
+}
+
+function makeCollector(): CodeCollectorHarness {
+  const cfg: PuppeteerConfig = { headless: true, timeout: 2000 } as PuppeteerConfig;
   const browserManager = {
     getBrowser: () => null,
     getCurrentPage: () => null,
     newPage: async () => ({}),
-    launch: async () => ({ isConnected: () => true, on: () => {} }),
-    close: async () => {},
-  } as any;
-  return new CodeCollector(cfg, browserManager) as any;
+    launch: async () => ({ isConnected: () => true, on: () => undefined }),
+    close: async () => undefined,
+  } satisfies BrowserManagerLike;
+  return new CodeCollector(
+    cfg,
+    browserManager as unknown as ConstructorParameters<typeof CodeCollector>[1],
+  ) as unknown as CodeCollectorHarness;
 }
 
 describe('CodeCollector extended helpers', () => {
@@ -58,7 +111,7 @@ describe('CodeCollector extended helpers', () => {
         { url: 'inline-3', content: 'c', size: 1, type: 'inline', metadata: { truncated: false } },
       ],
     };
-    const inline = await c.collectInlineScripts(inlinePage as any);
+    const inline = await c.collectInlineScripts(inlinePage);
     assert.strictEqual(inline.length, 2);
 
     let evalCount = 0;
@@ -71,7 +124,7 @@ describe('CodeCollector extended helpers', () => {
         return 'console.log("sw")';
       },
     };
-    const sw = await c.collectServiceWorkers(swPage as any);
+    const sw = await c.collectServiceWorkers(swPage);
     assert.strictEqual(sw.length, 1);
     assert.ok(evalCount >= 2);
 
@@ -85,7 +138,7 @@ describe('CodeCollector extended helpers', () => {
         return ['w.js', '/x.js'];
       },
     };
-    const ww = await c.collectWebWorkers(wwPage as any);
+    const ww = await c.collectWebWorkers(wwPage);
     assert.strictEqual(ww.length, 2);
     assert.ok(ww[0]?.url.includes('https://example.com'));
   });
@@ -146,26 +199,26 @@ describe('CodeCollector extended helpers', () => {
 
     const perfOk = await c.getPerformanceMetrics({
       evaluate: async () => ({ totalTime: 1 }),
-    } as any);
-    assert.strictEqual((perfOk as any).totalTime, 1);
+    });
+    assert.strictEqual(perfOk.totalTime, 1);
 
     const perfBad = await c.getPerformanceMetrics({
       evaluate: async () => {
         throw new Error('perf fail');
       },
-    } as any);
+    });
     assert.deepStrictEqual(perfBad, {});
 
     const metaOk = await c.collectPageMetadata({
       evaluate: async () => ({ title: 't', url: 'u' }),
-    } as any);
-    assert.strictEqual((metaOk as any).title, 't');
+    });
+    assert.strictEqual(metaOk.title, 't');
 
     const metaBad = await c.collectPageMetadata({
       evaluate: async () => {
         throw new Error('meta fail');
       },
-    } as any);
+    });
     assert.deepStrictEqual(metaBad, {});
 
     c.collectedUrls.add('https://x');

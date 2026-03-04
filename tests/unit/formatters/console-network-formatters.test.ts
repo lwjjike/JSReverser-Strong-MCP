@@ -15,6 +15,10 @@ describe('console and network formatters', () => {
       consoleMessageStableId: 7,
       type: 'error',
       message: 'Request failed',
+      sourceMapHints: {
+        'app.js': 'https://cdn.example.com/app.js.map',
+        'vendor.js': 'https://cdn.example.com/vendor.js.map',
+      },
       args: [
         JSON.stringify({
           message: 'outer boom',
@@ -30,8 +34,10 @@ describe('console and network formatters', () => {
     assert.ok(output.includes('### Arguments'));
     assert.ok(output.includes('outer boom'));
     assert.ok(output.includes('app.js:10:2'));
+    assert.ok(output.includes('SourceMap: https://cdn.example.com/app.js.map'));
     assert.ok(output.includes('inner boom'));
     assert.ok(output.includes('vendor.js:2:1'));
+    assert.ok(output.includes('SourceMap: https://cdn.example.com/vendor.js.map'));
     assert.ok(output.includes('Cause'));
   });
 

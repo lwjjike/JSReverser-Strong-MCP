@@ -21,6 +21,7 @@ import type {
   ConsoleMessage,
   Debugger,
   Dialog,
+  Frame,
   HTTPRequest,
   Page,
   PredefinedNetworkConditions,
@@ -89,6 +90,7 @@ export class McpContext implements Context {
   #cpuThrottlingRateMap = new WeakMap<Page, number>();
   #dialog?: Dialog;
   #debuggerContext: DebuggerContext = new DebuggerContext();
+  #selectedFrame?: Frame;
 
   #traceResults: TraceResult[] = [];
   #trafficSummaryCache = new Map<number, TrafficSummary>();
@@ -152,13 +154,23 @@ export class McpContext implements Context {
   }
 
   async #initDebugger(): Promise<void> {
+    return this.#initDebuggerForFrame();
+  }
+
+  async #initDebuggerForFrame(frame?: Frame): Promise<void> {
     const page = this.getSelectedPage();
     if (!page) {
       return;
     }
     try {
-      // @ts-expect-error _client is internal Puppeteer API
-      const client = page._client();
+      let client;
+      if (frame && frame !== page.mainFrame()) {
+        // @ts-expect-error client is a public getter on Frame but not in all type definitions
+        client = frame.client;
+      } else {
+        // @ts-expect-error _client is internal Puppeteer API
+        client = page._client();
+      }
       await this.#debuggerContext.enable(client);
     } catch (error) {
       this.logger('Failed to initialize debugger context', error);
@@ -186,6 +198,11 @@ export class McpContext implements Context {
   async reinitDebugger(): Promise<void> {
     await this.#debuggerContext.disable();
     await this.#initDebugger();
+  }
+
+  async reinitDebuggerForFrame(frame: Frame): Promise<void> {
+    await this.#debuggerContext.disable();
+    await this.#initDebuggerForFrame(frame);
   }
 
   static async from(
@@ -338,9 +355,24 @@ export class McpContext implements Context {
       oldPage.off('dialog', this.#dialogHandler);
     }
     this.#selectedPage = newPage;
+    this.#selectedFrame = undefined;
     newPage.on('dialog', this.#dialogHandler);
     this.#updateSelectedPageTimeouts();
     // Reinitialize debugger for the new page
+    void this.reinitDebugger();
+  }
+
+  getSelectedFrame(): Frame {
+    return this.#selectedFrame ?? this.getSelectedPage().mainFrame();
+  }
+
+  selectFrame(frame: Frame): void {
+    this.#selectedFrame = frame;
+    void this.reinitDebuggerForFrame(frame);
+  }
+
+  resetSelectedFrame(): void {
+    this.#selectedFrame = undefined;
     void this.reinitDebugger();
   }
 

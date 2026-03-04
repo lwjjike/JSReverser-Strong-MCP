@@ -34,6 +34,7 @@ import {
   stopMonitor,
   traceFunction,
 } from '../../../src/tools/debugger.js';
+import { listFrames, selectFrame } from '../../../src/tools/frames.js';
 
 interface DebuggerResponseHarness {
   lines: string[];
@@ -98,7 +99,10 @@ interface DebuggerContextHarness {
 }
 
 interface ToolContextHarness {
-  getSelectedPage(): {evaluate(...args: unknown[]): Promise<unknown>};
+  getSelectedPage(): {evaluate(...args: unknown[]): Promise<unknown>; frames?(): unknown[]; mainFrame?(): unknown};
+  getSelectedFrame?(): {evaluate(...args: unknown[]): Promise<unknown>};
+  selectFrame?(frame: unknown): void;
+  resetSelectedFrame?(): void;
   getNetworkRequestById(): {url(): string};
   getRequestInitiator(): unknown;
   debuggerContext: DebuggerContextHarness;
@@ -154,6 +158,9 @@ function makeContext(overrides: Partial<ToolContextHarness> = {}): ToolContextHa
 
   return {
     getSelectedPage: () => page,
+    getSelectedFrame: () => page,
+    selectFrame: () => undefined,
+    resetSelectedFrame: () => undefined,
     getNetworkRequestById: () => ({ url: () => 'https://api.example.com' }),
     getRequestInitiator: () => undefined,
     debuggerContext,
@@ -236,6 +243,7 @@ describe('debugger tools extended', () => {
     assert.ok(response.lines.some((x) => x.includes('Breakpoint set successfully')));
     assert.ok(response.lines.some((x) => x.includes('Active breakpoints')));
     assert.ok(response.lines.some((x) => x.includes('Call Stack')));
+    assert.ok(response.lines.some((x) => x.includes('URL: https://a.js [SourceMap: https://a.js.map]')));
     assert.ok(response.lines.some((x) => x.includes('SourceMap')));
   });
 
@@ -327,9 +335,35 @@ describe('debugger tools extended', () => {
   it('covers page-eval tools: hook/list/unhook/inspect/storage/monitor', async () => {
     const response = makeResponse();
     let evalCount = 0;
+    let pageEvalCount = 0;
+    let frameEvalCount = 0;
+    const frame = {
+      evaluate: async () => {
+        frameEvalCount += 1;
+        switch (frameEvalCount) {
+          case 1:
+            return { success: true, hookId: 'h1' };
+          case 2:
+            return [{ id: 'h1', target: 'Window.fetch' }];
+          case 3:
+            return { success: true };
+          case 4:
+            return { type: 'object', constructor: 'Object', value: { a: 1 } };
+          case 5:
+            return { localStorage: { token: 'x' } };
+          case 6:
+            return { success: true, monitorId: 'm1', eventCount: 2 };
+          default:
+            return { success: true };
+        }
+      },
+    };
     const context = makeContext({
       getSelectedPage: () => ({
+        frames: () => [frame],
+        mainFrame: () => frame,
         evaluate: async () => {
+          pageEvalCount += 1;
           evalCount += 1;
           switch (evalCount) {
             case 1:
@@ -349,6 +383,7 @@ describe('debugger tools extended', () => {
           }
         },
       }),
+      getSelectedFrame: () => frame,
     });
 
     await hookFunction.handler({ params: { target: 'window.fetch', logArgs: true, logResult: true, logStack: false } }, response as unknown as Parameters<typeof hookFunction.handler>[1], context as unknown as Parameters<typeof hookFunction.handler>[2]);
@@ -364,6 +399,65 @@ describe('debugger tools extended', () => {
     assert.ok(response.lines.some((x) => x.includes('Storage data')));
     assert.ok(response.lines.some((x) => x.includes('Event monitor started')));
     assert.ok(response.lines.some((x) => x.includes('Monitor "m1" stopped')));
+    assert.strictEqual(pageEvalCount, 0);
+    assert.strictEqual(frameEvalCount, 7);
+  });
+
+  it('lists frames and switches execution context', async () => {
+    const response = makeResponse();
+    const selectedCalls: unknown[] = [];
+    let resetCount = 0;
+    const mainFrame = {
+      url: () => 'https://root.example.com',
+      name: () => '',
+      parentFrame: () => null,
+      evaluate: async () => undefined,
+    };
+    const childFrame = {
+      url: () => 'https://child.example.com',
+      name: () => 'auth-frame',
+      parentFrame: () => mainFrame,
+      evaluate: async () => undefined,
+    };
+    const page = {
+      evaluate: async () => undefined,
+      frames: () => [mainFrame, childFrame],
+      mainFrame: () => mainFrame,
+    };
+    const context = makeContext({
+      getSelectedPage: () => page,
+      getSelectedFrame: () => childFrame,
+      selectFrame: (frame) => {
+        selectedCalls.push(frame);
+      },
+      resetSelectedFrame: () => {
+        resetCount += 1;
+      },
+    });
+
+    await listFrames.handler(
+      { params: {} },
+      response as unknown as Parameters<typeof listFrames.handler>[1],
+      context as unknown as Parameters<typeof listFrames.handler>[2],
+    );
+    await selectFrame.handler(
+      { params: { frameIdx: 1 } },
+      response as unknown as Parameters<typeof selectFrame.handler>[1],
+      context as unknown as Parameters<typeof selectFrame.handler>[2],
+    );
+    await selectFrame.handler(
+      { params: { frameIdx: 0 } },
+      response as unknown as Parameters<typeof selectFrame.handler>[1],
+      context as unknown as Parameters<typeof selectFrame.handler>[2],
+    );
+
+    assert.ok(response.lines.some((line) => line.includes('Frames (2 total)')));
+    assert.ok(response.lines.some((line) => line.includes('0: https://root.example.com')));
+    assert.ok(response.lines.some((line) => line.includes('1: https://child.example.com name="auth-frame" [selected]')));
+    assert.ok(response.lines.some((line) => line.includes('Switched to frame 1: https://child.example.com (name: "auth-frame")')));
+    assert.ok(response.lines.some((line) => line.includes('Switched to main frame.')));
+    assert.deepStrictEqual(selectedCalls, [childFrame]);
+    assert.strictEqual(resetCount, 1);
   });
 
   it('covers XHR breakpoint helpers', async () => {

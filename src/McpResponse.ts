@@ -231,6 +231,8 @@ export class McpResponse implements Response {
 
     let consoleData: ConsoleMessageData | undefined;
 
+    const consoleSourceMapHints = this.#getConsoleSourceMapHints(context);
+
     if (this.#attachedConsoleMessageId) {
       const message = context.getConsoleMessageById(
         this.#attachedConsoleMessageId,
@@ -242,6 +244,7 @@ export class McpResponse implements Response {
           consoleMessageStableId,
           type: consoleMessage.type(),
           message: consoleMessage.text(),
+          sourceMapHints: consoleSourceMapHints,
           args: await Promise.all(
             consoleMessage.args().map(async arg => {
               const stringArg = await arg.jsonValue().catch(() => {
@@ -303,6 +306,7 @@ export class McpResponse implements Response {
                 consoleMessageStableId,
                 type: consoleMessage.type(),
                 message: consoleMessage.text(),
+                sourceMapHints: consoleSourceMapHints,
                 args: await Promise.all(
                   consoleMessage.args().map(async arg => {
                     const stringArg = await arg.jsonValue().catch(() => {
@@ -539,6 +543,16 @@ export class McpResponse implements Response {
 
     response.push(formatConsoleEventVerbose(data));
     return response;
+  }
+
+  #getConsoleSourceMapHints(context: McpContext): Record<string, string> | undefined {
+    const scripts = context.debuggerContext.getScripts();
+    const hints = Object.fromEntries(
+      scripts
+        .filter((script) => Boolean(script.url) && Boolean(script.sourceMapURL))
+        .map((script) => [script.url, script.sourceMapURL as string]),
+    );
+    return Object.keys(hints).length > 0 ? hints : undefined;
   }
 
   #formatNetworkRequestData(

@@ -19,6 +19,10 @@ import {zod} from '../third_party/index.js';
 import {ToolCategory} from './categories.js';
 import {defineTool} from './ToolDefinition.js';
 
+function formatUrlWithSourceMap(url: string, sourceMapURL?: string): string {
+  return sourceMapURL ? `${url} [SourceMap: ${sourceMapURL}]` : url;
+}
+
 function formatStackFrameLocation(
   frame: {
     url?: string;
@@ -35,6 +39,40 @@ function formatStackFrameLocation(
   return sourceMapURL
     ? `${location} [SourceMap: ${sourceMapURL}]`
     : location;
+}
+
+function findSourceMapURLByScriptUrl(
+  debugger_: {
+    getScripts(): Array<{url?: string; sourceMapURL?: string}>;
+    getScriptsByUrlPattern?(pattern: string): Array<{
+      url?: string;
+      sourceMapURL?: string;
+    }>;
+    getScriptById?(scriptId: string): {sourceMapURL?: string} | undefined;
+  },
+  url?: string,
+  stackFrames?: Array<{url?: string; scriptId?: string}>,
+): string | undefined {
+  if (!url) {
+    return undefined;
+  }
+  const directMatch = debugger_.getScripts().find((script) => script.url === url);
+  if (directMatch?.sourceMapURL) {
+    return directMatch.sourceMapURL;
+  }
+  const patternMatch = debugger_
+    .getScriptsByUrlPattern?.(url)
+    .find((script) => script.url === url)?.sourceMapURL;
+  if (patternMatch) {
+    return patternMatch;
+  }
+  const stackFrameMatch = stackFrames?.find(
+    (frame) => frame.url === url && frame.scriptId,
+  );
+  if (stackFrameMatch?.scriptId) {
+    return debugger_.getScriptById?.(stackFrameMatch.scriptId)?.sourceMapURL;
+  }
+  return undefined;
 }
 
 /**
@@ -770,7 +808,14 @@ export const getRequestInitiator = defineTool({
       response.appendResponseLine(`Type: ${initiator.type}`);
 
       if (initiator.url) {
-        response.appendResponseLine(`URL: ${initiator.url}`);
+        const initiatorSourceMapURL = findSourceMapURLByScriptUrl(
+          debugger_,
+          initiator.url,
+          initiator.stack?.callFrames,
+        );
+        response.appendResponseLine(
+          `URL: ${formatUrlWithSourceMap(initiator.url, initiatorSourceMapURL)}`,
+        );
       }
       if (initiator.lineNumber !== undefined) {
         response.appendResponseLine(`Line: ${initiator.lineNumber + 1}`);
@@ -1555,8 +1600,8 @@ export const hookFunction = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const result = await page.evaluate(hookCode);
+      const frame = context.getSelectedFrame();
+      const result = await frame.evaluate(hookCode);
 
       if (result && typeof result === 'object') {
         if ((result as {success: boolean}).success) {
@@ -1622,8 +1667,8 @@ export const unhookFunction = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const result = await page.evaluate(unhookCode);
+      const frame = context.getSelectedFrame();
+      const result = await frame.evaluate(unhookCode);
 
       if (result && typeof result === 'object') {
         if ((result as {success: boolean}).success) {
@@ -1668,8 +1713,8 @@ export const listHooks = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const hooks = (await page.evaluate(listCode)) as Array<{
+      const frame = context.getSelectedFrame();
+      const hooks = (await frame.evaluate(listCode)) as Array<{
         id: string;
         target: string;
       }>;
@@ -1814,8 +1859,8 @@ export const inspectObject = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const result = await page.evaluate(inspectCode);
+      const frame = context.getSelectedFrame();
+      const result = await frame.evaluate(inspectCode);
 
       if (result && typeof result === 'object' && 'error' in result) {
         response.appendResponseLine(`❌ ${(result as {error: string}).error}`);
@@ -1927,8 +1972,8 @@ export const getStorage = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const result = await page.evaluate(storageCode);
+      const frame = context.getSelectedFrame();
+      const result = await frame.evaluate(storageCode);
 
       response.appendResponseLine(
         `Storage data${filter ? ` (filter: "${filter}")` : ''}:\n`,
@@ -2140,8 +2185,8 @@ export const monitorEvents = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const result = await page.evaluate(monitorCode);
+      const frame = context.getSelectedFrame();
+      const result = await frame.evaluate(monitorCode);
 
       if (result && typeof result === 'object') {
         if ((result as {success: boolean}).success) {
@@ -2206,8 +2251,8 @@ export const stopMonitor = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const result = await page.evaluate(stopCode);
+      const frame = context.getSelectedFrame();
+      const result = await frame.evaluate(stopCode);
 
       if (result && typeof result === 'object') {
         if ((result as {success: boolean}).success) {

@@ -8,7 +8,7 @@ import type {DebuggerContext} from '../DebuggerContext.js';
 import type {TrafficSummary} from '../formatters/websocketFormatter.js';
 import type {RequestInitiator} from '../PageCollector.js';
 import {zod} from '../third_party/index.js';
-import type {Dialog, HTTPRequest, Page} from '../third_party/index.js';
+import type {Dialog, Frame, HTTPRequest, Page} from '../third_party/index.js';
 import type {TraceResult} from '../trace-processing/parse.js';
 import type {PaginationOptions} from '../utils/types.js';
 import type {WebSocketData} from '../WebSocketCollector.js';
@@ -99,6 +99,9 @@ export type Context = Readonly<{
   newPage(): Promise<Page>;
   closePage(pageIdx: number): Promise<void>;
   selectPage(page: Page): void;
+  getSelectedFrame(): Frame;
+  selectFrame(frame: Frame): void;
+  resetSelectedFrame(): void;
   setNetworkConditions(conditions: string | null): void;
   setCpuThrottlingRate(rate: number): void;
   saveTemporaryFile(

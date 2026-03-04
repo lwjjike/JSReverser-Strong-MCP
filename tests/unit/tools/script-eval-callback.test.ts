@@ -22,8 +22,11 @@ interface PageLike {
   ): Promise<string>;
 }
 
+interface FrameLike extends PageLike {}
+
 interface ContextLike {
   getSelectedPage(): PageLike;
+  getSelectedFrame(): FrameLike;
   waitForEventsAfterAction(action: () => Promise<void>): Promise<void>;
 }
 
@@ -59,6 +62,7 @@ describe('evaluate_script callback path', () => {
 
     const context: ContextLike = {
       getSelectedPage: () => page,
+      getSelectedFrame: () => page,
       waitForEventsAfterAction: async (action: () => Promise<void>) => {
         await action();
       },
@@ -79,6 +83,15 @@ describe('evaluate_script callback path', () => {
     await evaluateScript.handler({ params: { function: '() => ({ ok: true })' } } as Parameters<typeof evaluateScript.handler>[0], response as Parameters<typeof evaluateScript.handler>[1], {
       ...context,
       getSelectedPage: () => ({
+        ...page,
+        evaluate: async (callback: unknown) => {
+          if (typeof callback !== 'function') {
+            throw new Error('expected callback evaluate path');
+          }
+          return callback(fn);
+        },
+      }),
+      getSelectedFrame: () => ({
         ...page,
         evaluate: async (callback: unknown) => {
           if (typeof callback !== 'function') {
@@ -128,5 +141,68 @@ describe('evaluate_script callback path', () => {
 
     assert.strictEqual(injected, 'window.__preload = 1;');
     assert.ok(lines.some((line) => line.includes('Preload script registered')));
+  });
+
+  it('runs evaluate_script in the selected frame execution context', async () => {
+    const lines: string[] = [];
+    let pageUsed = false;
+    let frameUsed = false;
+
+    const frameHandle = {
+      dispose: async () => undefined,
+    } satisfies HandleLike;
+
+    const page: PageLike = {
+      evaluateHandle: async () => {
+        pageUsed = true;
+        throw new Error('page should not be used when a frame is selected');
+      },
+      evaluate: async () => {
+        pageUsed = true;
+        throw new Error('page should not be used when a frame is selected');
+      },
+    };
+
+    const frame: FrameLike = {
+      evaluateHandle: async () => {
+        frameUsed = true;
+        return frameHandle;
+      },
+      evaluate: async (callback) => {
+        frameUsed = true;
+        if (typeof callback !== 'function') {
+          throw new Error('expected callback evaluate path');
+        }
+        return callback(async () => ({ok: true}));
+      },
+    };
+
+    const response: ResponseLike = {
+      appendResponseLine: (v: string) => lines.push(v),
+      setIncludePages: () => undefined,
+      setIncludeNetworkRequests: () => undefined,
+      setIncludeConsoleData: () => undefined,
+      attachImage: () => undefined,
+      attachNetworkRequest: () => undefined,
+      attachConsoleMessage: () => undefined,
+      setIncludeWebSocketConnections: () => undefined,
+      attachWebSocket: () => undefined,
+    };
+
+    await evaluateScript.handler(
+      { params: { function: '() => ({ ok: true })' } } as Parameters<typeof evaluateScript.handler>[0],
+      response as Parameters<typeof evaluateScript.handler>[1],
+      {
+        getSelectedPage: () => page,
+        getSelectedFrame: () => frame,
+        waitForEventsAfterAction: async (action: () => Promise<void>) => {
+          await action();
+        },
+      } as unknown as Parameters<typeof evaluateScript.handler>[2],
+    );
+
+    assert.strictEqual(pageUsed, false);
+    assert.strictEqual(frameUsed, true);
+    assert.ok(lines.some((line) => line.includes('{"ok":true}')));
   });
 });

@@ -14,6 +14,7 @@ export interface ConsoleMessageData {
   count?: number;
   description?: string;
   args?: string[];
+  sourceMapHints?: Record<string, string>;
 }
 
 interface SerializedErrorLike {
@@ -72,17 +73,48 @@ function tryParseSerializedError(arg: string): SerializedErrorLike | undefined {
   return undefined;
 }
 
-function formatErrorChain(error: SerializedErrorLike, depth = 0): string[] {
+function annotateStackLine(
+  line: string,
+  sourceMapHints?: Record<string, string>,
+): string {
+  if (!sourceMapHints || !line.includes(':')) {
+    return line;
+  }
+
+  const candidates = Object.keys(sourceMapHints).sort((a, b) => b.length - a.length);
+  for (const candidate of candidates) {
+    if (!line.includes(candidate)) {
+      continue;
+    }
+    const sourceMapURL = sourceMapHints[candidate];
+    if (!sourceMapURL || line.includes('[SourceMap:')) {
+      continue;
+    }
+    return `${line} [SourceMap: ${sourceMapURL}]`;
+  }
+
+  return line;
+}
+
+function formatErrorChainWithSourceMaps(
+  error: SerializedErrorLike,
+  sourceMapHints?: Record<string, string>,
+  depth = 0,
+): string[] {
   const prefix = depth === 0 ? 'Error' : `${'  '.repeat(depth - 1)}Cause`;
   const lines = [`${prefix}: ${error.message ?? '<unknown error>'}`];
   if (error.stack) {
     lines.push(`${'  '.repeat(depth)}Stack:`);
     for (const line of error.stack.split('\n')) {
-      lines.push(`${'  '.repeat(depth)}${line}`);
+      lines.push(
+        `${'  '.repeat(depth)}${annotateStackLine(line, sourceMapHints)}`,
+      );
     }
   }
   if (error.cause) {
-    lines.push(...formatErrorChain(error.cause, depth + 1));
+    lines.push(
+      ...formatErrorChainWithSourceMaps(error.cause, sourceMapHints, depth + 1),
+    );
   }
   return lines;
 }
@@ -101,7 +133,12 @@ function formatArgs(consoleData: ConsoleMessageData): string {
     if (typeof arg === 'string') {
       const parsedError = tryParseSerializedError(arg);
       if (parsedError) {
-        result.push(...formatErrorChain(parsedError));
+        result.push(
+          ...formatErrorChainWithSourceMaps(
+            parsedError,
+            consoleData.sourceMapHints,
+          ),
+        );
       }
     }
   }

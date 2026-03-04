@@ -30,9 +30,10 @@
   - [`get_websocket_messages`](#get_websocket_messages)
   - [`list_network_requests`](#list_network_requests)
   - [`list_websocket_connections`](#list_websocket_connections)
-- **[Debugging](#debugging)** (4 tools)
+- **[Debugging](#debugging)** (5 tools)
   - [`evaluate_script`](#evaluate_script)
   - [`get_console_message`](#get_console_message)
+  - [`inject_preload_script`](#inject_preload_script)
   - [`list_console_messages`](#list_console_messages)
   - [`take_screenshot`](#take_screenshot)
 - **[JS Reverse Engineering](#js-reverse-engineering)** (45 tools)
@@ -307,14 +308,6 @@ so returned values have to JSON-serializable.
 
 - `function`
 
-### `inject_preload_script`
-
-**Description:** Register JavaScript that will run on future document loads before page scripts execute. Useful for early hook injection, env patches, and preload instrumentation.
-
-**Parameters:**
-
-- `script`
-
 ### `get_console_message`
 
 **Description:** Gets a console message by its ID. You can get all messages by calling list_console_messages.
@@ -322,6 +315,14 @@ so returned values have to JSON-serializable.
 **Parameters:**
 
 - `msgid`
+
+### `inject_preload_script`
+
+**Description:** Register a JavaScript snippet that will run on future document loads before page scripts execute. Use this for preload hooks, environment patches, and early instrumentation.
+
+**Parameters:**
+
+- `script`
 
 ### `list_console_messages`
 
@@ -474,7 +475,7 @@ so returned values have to JSON-serializable.
 
 ### `get_paused_info`
 
-**Description:** Gets information about the current paused state including call stack, current location, scope variables, and any available SourceMap hints for loaded scripts. Use this after a breakpoint is hit to understand the execution context.
+**Description:** Gets information about the current paused state including call stack, current location, and scope variables. Use this after a breakpoint is hit to understand the execution context.
 
 **Parameters:**
 
@@ -483,7 +484,7 @@ so returned values have to JSON-serializable.
 
 ### `get_request_initiator`
 
-**Description:** Gets the JavaScript call stack that initiated a network request. This helps trace which code triggered an API call, including async parent frames and any available SourceMap hints for the involved scripts.
+**Description:** Gets the JavaScript call stack that initiated a network request. This helps trace which code triggered an API call.
 
 **Parameters:**
 
@@ -759,3 +760,4 @@ so returned values have to JSON-serializable.
 **Parameters:**
 
 - `hookId`
+

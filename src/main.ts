@@ -27,6 +27,7 @@ import * as consoleTools from './tools/console.js';
 import * as debuggerTools from './tools/debugger.js';
 import * as jshookDomTools from './tools/dom.js';
 import * as jshookHookTools from './tools/hook.js';
+import * as frameTools from './tools/frames.js';
 import * as networkTools from './tools/network.js';
 import * as jshookPageTools from './tools/page.js';
 import * as pagesTools from './tools/pages.js';
@@ -213,6 +214,7 @@ function asTools(module: object): ToolDefinition[] {
 const toolSources: Array<{source: string; tools: ToolDefinition[]}> = [
   {source: 'console', tools: asTools(consoleTools)},
   {source: 'debugger', tools: asTools(debuggerTools)},
+  {source: 'frames', tools: asTools(frameTools)},
   {source: 'network', tools: asTools(networkTools)},
   {source: 'pages', tools: asTools(pagesTools)},
   {source: 'screenshot', tools: asTools(screenshotTools)},

@@ -1,5 +1,10 @@
-import {describe, it} from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import {describe, it} from 'node:test';
 
 async function importFreshRuntime(tag: string) {
   return import(`../../../src/tools/runtime.js?branch=${tag}_${Date.now()}`);

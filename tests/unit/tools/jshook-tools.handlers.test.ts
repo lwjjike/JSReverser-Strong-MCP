@@ -1,8 +1,15 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
-import {mkdtemp, readFile, rm} from 'node:fs/promises';
-import {join} from 'node:path';
-import {tmpdir} from 'node:os';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, it } from 'node:test';
+
+import { StealthScripts2025 } from '../../../src/modules/stealth/StealthScripts2025.js';
 import {
   analyzeTarget,
   deobfuscateCode,
@@ -35,27 +42,116 @@ import {
   listStealthPresets,
   setUserAgent,
 } from '../../../src/tools/stealth.js';
-import { StealthScripts2025 } from '../../../src/modules/stealth/StealthScripts2025.js';
 
-function makeResponse() {
+type RuntimeMethod = (...args: unknown[]) => unknown;
+
+interface ToolResponseHarness {
+  lines: string[];
+  appendResponseLine(value: string): void;
+  setIncludePages(): void;
+  setIncludeNetworkRequests(): void;
+  setIncludeConsoleData(): void;
+  attachImage(): void;
+  attachNetworkRequest(): void;
+  attachConsoleMessage(): void;
+  setIncludeWebSocketConnections(): void;
+  attachWebSocket(): void;
+}
+
+interface ToolDefinitionHarness {
+  handler(request: { params: unknown }, response: ToolResponseHarness, context: object): Promise<void>;
+}
+
+interface RuntimeHarness {
+  deobfuscator: { deobfuscate: RuntimeMethod };
+  analyzer: { understand: RuntimeMethod };
+  summarizer: {
+    summarizeFile: RuntimeMethod;
+    summarizeBatch: RuntimeMethod;
+    summarizeProject: RuntimeMethod;
+  };
+  cryptoDetector: { detect: RuntimeMethod };
+  collector: {
+    collect: RuntimeMethod;
+    getFilesByPattern: RuntimeMethod;
+    getCollectedFilesSummary: RuntimeMethod;
+    getTopPriorityFiles: RuntimeMethod;
+    getActivePage: RuntimeMethod;
+  };
+  domInspector: {
+    querySelector: RuntimeMethod;
+    querySelectorAll: RuntimeMethod;
+    getStructure: RuntimeMethod;
+    findClickable: RuntimeMethod;
+  };
+  hookManager: {
+    create: RuntimeMethod;
+    getHook: RuntimeMethod;
+    getAllHooks: RuntimeMethod;
+    getRecords: RuntimeMethod;
+    exportData: RuntimeMethod;
+    getStats: RuntimeMethod;
+    remove: RuntimeMethod;
+  };
+  pageController: {
+    injectScript: RuntimeMethod;
+    navigate: RuntimeMethod;
+    click: RuntimeMethod;
+    type: RuntimeMethod;
+    waitForSelector: RuntimeMethod;
+    screenshot: RuntimeMethod;
+    getPerformanceMetrics: RuntimeMethod;
+    getPage: RuntimeMethod;
+    getCookies: RuntimeMethod;
+    getLocalStorage: RuntimeMethod;
+    getSessionStorage: RuntimeMethod;
+    clearCookies: RuntimeMethod;
+    clearLocalStorage: RuntimeMethod;
+    clearSessionStorage: RuntimeMethod;
+    setCookies: RuntimeMethod;
+    setLocalStorage: RuntimeMethod;
+    setSessionStorage: RuntimeMethod;
+    replayActions: RuntimeMethod;
+    evaluate: RuntimeMethod;
+  };
+  browserManager: {
+    getBrowser: RuntimeMethod;
+  };
+}
+
+interface StealthStaticHarness {
+  injectAll: RuntimeMethod;
+  getPresets: RuntimeMethod;
+}
+
+const invokeTool = async (
+  tool: ToolDefinitionHarness,
+  params: Record<string, unknown>,
+  response: ToolResponseHarness,
+): Promise<void> => {
+  await tool.handler({ params }, response, {});
+};
+
+function makeResponse(): ToolResponseHarness {
   const lines: string[] = [];
   return {
     lines,
     appendResponseLine: (v: string) => lines.push(v),
-    setIncludePages: () => {},
-    setIncludeNetworkRequests: () => {},
-    setIncludeConsoleData: () => {},
-    attachImage: () => {},
-    attachNetworkRequest: () => {},
-    attachConsoleMessage: () => {},
-    setIncludeWebSocketConnections: () => {},
-    attachWebSocket: () => {},
+    setIncludePages: () => undefined,
+    setIncludeNetworkRequests: () => undefined,
+    setIncludeConsoleData: () => undefined,
+    attachImage: () => undefined,
+    attachNetworkRequest: () => undefined,
+    attachConsoleMessage: () => undefined,
+    setIncludeWebSocketConnections: () => undefined,
+    attachWebSocket: () => undefined,
   };
 }
 
 describe('jshook tools handlers', () => {
   it('covers analyzer/collector/dom/hook/page/stealth handlers', async () => {
-    const runtime = getJSHookRuntime() as any;
+    const runtime = getJSHookRuntime() as unknown as RuntimeHarness;
+    const stealth = StealthScripts2025 as unknown as StealthStaticHarness;
 
     const originals = {
       deobfuscate: runtime.deobfuscator.deobfuscate,
@@ -100,8 +196,8 @@ describe('jshook tools handlers', () => {
       evaluate: runtime.pageController.evaluate,
       getActivePage: runtime.collector.getActivePage,
       getBrowser: runtime.browserManager.getBrowser,
-      injectAll: (StealthScripts2025 as any).injectAll,
-      getPresets: (StealthScripts2025 as any).getPresets,
+      injectAll: stealth.injectAll,
+      getPresets: stealth.getPresets,
     };
 
     runtime.deobfuscator.deobfuscate = async () => ({
@@ -144,16 +240,16 @@ describe('jshook tools handlers', () => {
 
     let hookCounter = 0;
     const baseTs = Date.now();
-    runtime.hookManager.create = ({ type }: { type: string }) => {
+    runtime.hookManager.create = (({ type }: { type: string }) => {
       hookCounter += 1;
       return {
         hookId: hookCounter === 1 ? 'h1' : `${type}-hook-${hookCounter}`,
         script: `/* ${type} hook */`,
       };
-    };
-    runtime.hookManager.getHook = (id: string) => (id === 'missing' ? undefined : { hookId: id, script: 'console.log(1)' });
+    }) as RuntimeMethod;
+    runtime.hookManager.getHook = ((id: string) => (id === 'missing' ? undefined : { hookId: id, script: 'console.log(1)' })) as RuntimeMethod;
     runtime.hookManager.getAllHooks = () => [{ hookId: 'h1' }, { hookId: 'xhr-hook-2' }, { hookId: 'websocket-hook-3' }];
-    runtime.hookManager.getRecords = (hookId: string) => {
+    runtime.hookManager.getRecords = ((hookId: string) => {
       if (hookId.includes('xhr')) {
         return [{
           id: 11,
@@ -219,7 +315,7 @@ describe('jshook tools handlers', () => {
           timestamp: baseTs + 2600,
         },
       ];
-    };
+    }) as RuntimeMethod;
     runtime.hookManager.exportData = () => 'hook-data-export';
     runtime.hookManager.getStats = () => ({
       totalHooks: 1,
@@ -228,82 +324,89 @@ describe('jshook tools handlers', () => {
       registeredTypes: ['fetch'],
       hooks: [{ hookId: 'h1', type: 'fetch', description: 'd', enabled: true, callCount: 1 }],
     });
-    runtime.hookManager.remove = (id: string) => id === 'h1';
+    runtime.hookManager.remove = ((id: string) => id === 'h1') as RuntimeMethod;
 
-    runtime.pageController.injectScript = async () => {};
+    runtime.pageController.injectScript = async () => undefined;
     runtime.pageController.navigate = async () => ({ ok: true, url: 'https://a.com' });
-    runtime.pageController.click = async () => {};
-    runtime.pageController.type = async () => {};
+    runtime.pageController.click = async () => undefined;
+    runtime.pageController.type = async () => undefined;
     runtime.pageController.waitForSelector = async () => ({ found: true });
     runtime.pageController.screenshot = async () => Buffer.from('shot');
     runtime.pageController.getPerformanceMetrics = async () => ({ fcp: 100 });
-    runtime.pageController.getCookies = async () => [{name: 'sid', value: '1'}];
-    runtime.pageController.getLocalStorage = async () => ({token: 'abc'});
-    runtime.pageController.getSessionStorage = async () => ({nonce: 'n'});
-    runtime.pageController.clearCookies = async () => {};
-    runtime.pageController.clearLocalStorage = async () => {};
-    runtime.pageController.clearSessionStorage = async () => {};
-    runtime.pageController.setCookies = async () => {};
-    runtime.pageController.setLocalStorage = async () => {};
-    runtime.pageController.setSessionStorage = async () => {};
-    runtime.pageController.replayActions = async (actions: any[]) =>
-      actions.map((a, i) => ({index: i, action: a.action, success: true, message: 'ok'}));
+    runtime.pageController.getCookies = async () => [{ name: 'sid', value: '1' }];
+    runtime.pageController.getLocalStorage = async () => ({ token: 'abc' });
+    runtime.pageController.getSessionStorage = async () => ({ nonce: 'n' });
+    runtime.pageController.clearCookies = async () => undefined;
+    runtime.pageController.clearLocalStorage = async () => undefined;
+    runtime.pageController.clearSessionStorage = async () => undefined;
+    runtime.pageController.setCookies = async () => undefined;
+    runtime.pageController.setLocalStorage = async () => undefined;
+    runtime.pageController.setSessionStorage = async () => undefined;
+    runtime.pageController.replayActions = ((
+      async (actions: Array<{ action: string }>) =>
+        actions.map((action, index) => ({
+          index,
+          action: action.action,
+          success: true,
+          message: 'ok',
+        }))
+    ) as RuntimeMethod);
     runtime.pageController.evaluate = async () => 2;
 
     const activePage = {
-      setUserAgent: async () => {},
+      setUserAgent: async () => undefined,
       url: () => 'https://example.com/dashboard',
       title: async () => 'Dashboard',
     };
-    runtime.pageController.getPage = async () => activePage as any;
+    runtime.pageController.getPage = async () => activePage;
     runtime.collector.getActivePage = async () => activePage;
 
-    (StealthScripts2025 as any).injectAll = async () => {};
-    (StealthScripts2025 as any).getPresets = () => ({ 'windows-chrome': { preset: 'windows-chrome' } });
+    stealth.injectAll = async () => undefined;
+    stealth.getPresets = () => ({ 'windows-chrome': { preset: 'windows-chrome' } });
 
     try {
       const res = makeResponse();
 
-      await deobfuscateCode.handler({ params: { code: 'x' } } as any, res as any, {} as any);
-      await understandCode.handler({ params: { code: 'x', focus: 'all' } } as any, res as any, {} as any);
+      await invokeTool(deobfuscateCode as unknown as ToolDefinitionHarness, { code: 'x' }, res);
+      await invokeTool(understandCode as unknown as ToolDefinitionHarness, { code: 'x', focus: 'all' }, res);
 
-      await summarizeCode.handler({ params: { mode: 'single', code: 'const x=1;' } } as any, res as any, {} as any);
-      await summarizeCode.handler({ params: { mode: 'batch', files: [] } } as any, res as any, {} as any);
-      await summarizeCode.handler({ params: { mode: 'project', files: [] } } as any, res as any, {} as any);
+      await invokeTool(summarizeCode as unknown as ToolDefinitionHarness, { mode: 'single', code: 'const x=1;' }, res);
+      await invokeTool(summarizeCode as unknown as ToolDefinitionHarness, { mode: 'batch', files: [] }, res);
+      await invokeTool(summarizeCode as unknown as ToolDefinitionHarness, { mode: 'project', files: [] }, res);
 
-      await detectCrypto.handler({ params: { code: 'md5(x)' } } as any, res as any, {} as any);
-      await analyzeTarget.handler({ params: { url: 'https://example.com', hookPreset: 'api-signature' } } as any, res as any, {} as any);
-      await analyzeTarget.handler({
-        params: {
-          url: 'https://example.com',
-          hookPreset: 'none',
-          autoInjectHooks: false,
-          autoReplayActions: [
-            {action: 'click', selector: '#submit'},
-            {action: 'type', selector: '#k', text: 'v'},
-          ],
-        },
-      } as any, res as any, {} as any);
+      await invokeTool(detectCrypto as unknown as ToolDefinitionHarness, { code: 'md5(x)' }, res);
+      await invokeTool(analyzeTarget as unknown as ToolDefinitionHarness, { url: 'https://example.com', hookPreset: 'api-signature' }, res);
+      await invokeTool(analyzeTarget as unknown as ToolDefinitionHarness, {
+        url: 'https://example.com',
+        hookPreset: 'none',
+        autoInjectHooks: false,
+        autoReplayActions: [
+          { action: 'click', selector: '#submit' },
+          { action: 'type', selector: '#k', text: 'v' },
+        ],
+      }, res);
       runtime.collector.collect = async () => null;
-      await analyzeTarget.handler({
-        params: { url: 'https://example.com', hookPreset: 'none', autoInjectHooks: false },
-      } as any, res as any, {} as any);
+      await invokeTool(analyzeTarget as unknown as ToolDefinitionHarness, {
+        url: 'https://example.com',
+        hookPreset: 'none',
+        autoInjectHooks: false,
+      }, res);
       runtime.collector.collect = async () => ({ files: 'bad-shape' });
-      await analyzeTarget.handler({
-        params: { url: 'https://example.com', hookPreset: 'none', autoInjectHooks: false },
-      } as any, res as any, {} as any);
+      await invokeTool(analyzeTarget as unknown as ToolDefinitionHarness, {
+        url: 'https://example.com',
+        hookPreset: 'none',
+        autoInjectHooks: false,
+      }, res);
       runtime.collector.collect = async () => ({ files: [{ url: 'a.js' }] });
       runtime.collector.getTopPriorityFiles = () => ({ files: [], totalSize: 0, totalFiles: 0 });
-      await analyzeTarget.handler({
-        params: {
-          url: 'https://example.com',
-          hookPreset: 'none',
-          autoInjectHooks: false,
-          runDeobfuscation: true,
-          correlationWindowMs: 500,
-          maxCorrelatedFlows: 3,
-        },
-      } as any, res as any, {} as any);
+      await invokeTool(analyzeTarget as unknown as ToolDefinitionHarness, {
+        url: 'https://example.com',
+        hookPreset: 'none',
+        autoInjectHooks: false,
+        runDeobfuscation: true,
+        correlationWindowMs: 500,
+        maxCorrelatedFlows: 3,
+      }, res);
       runtime.collector.getTopPriorityFiles = () => ({
         files: [{
           url: 'top-sign.js',
@@ -314,122 +417,123 @@ describe('jshook tools handlers', () => {
         totalSize: 64,
         totalFiles: 1,
       });
-      await analyzeTarget.handler({
-        params: {
-          url: 'https://example.com',
-          hookPreset: 'none',
-          autoInjectHooks: false,
-          waitAfterHookMs: 1,
-          maxFingerprints: 4,
-        },
-      } as any, res as any, {} as any);
-      await riskPanel.handler({ params: { code: 'md5(x)' } } as any, res as any, {} as any);
-      await riskPanel.handler({ params: { hookId: 'h1' } } as any, res as any, {} as any);
-      await riskPanel.handler({ params: { hookId: 'h1', includeHookSignals: false } } as any, res as any, {} as any);
+      await invokeTool(analyzeTarget as unknown as ToolDefinitionHarness, {
+        url: 'https://example.com',
+        hookPreset: 'none',
+        autoInjectHooks: false,
+        waitAfterHookMs: 1,
+        maxFingerprints: 4,
+      }, res);
+      await invokeTool(riskPanel as unknown as ToolDefinitionHarness, { code: 'md5(x)' }, res);
+      await invokeTool(riskPanel as unknown as ToolDefinitionHarness, { hookId: 'h1' }, res);
+      await invokeTool(riskPanel as unknown as ToolDefinitionHarness, { hookId: 'h1', includeHookSignals: false }, res);
       runtime.collector.getTopPriorityFiles = () => ({ files: [], totalSize: 0, totalFiles: 0 });
       await assert.rejects(async () => {
-        await riskPanel.handler({ params: {} } as any, res as any, {} as any);
+        await invokeTool(riskPanel as unknown as ToolDefinitionHarness, {}, res);
       });
       runtime.collector.getTopPriorityFiles = () => ({
         files: [{ url: 'top.js', content: 'x', size: 1, type: 'external' }],
         totalSize: 1,
         totalFiles: 1,
       });
-      await exportSessionReport.handler({ params: { format: 'json' } } as any, res as any, {} as any);
-      await exportSessionReport.handler({ params: { format: 'markdown', includeHookData: true } } as any, res as any, {} as any);
+      await invokeTool(exportSessionReport as unknown as ToolDefinitionHarness, { format: 'json' }, res);
+      await invokeTool(exportSessionReport as unknown as ToolDefinitionHarness, { format: 'markdown', includeHookData: true }, res);
 
-      await collectCode.handler({ params: { url: 'https://example.com' } } as any, res as any, {} as any);
-      await collectCode.handler({ params: { url: 'https://example.com', returnMode: 'summary' } } as any, res as any, {} as any);
-      await collectCode.handler({ params: { url: 'https://example.com', returnMode: 'pattern', pattern: 'b' } } as any, res as any, {} as any);
-      await collectCode.handler({ params: { url: 'https://example.com', returnMode: 'pattern' } } as any, res as any, {} as any);
-      await collectCode.handler({ params: { url: 'https://example.com', returnMode: 'top-priority' } } as any, res as any, {} as any);
-      await searchInScripts.handler({ params: { pattern: 'abc', limit: 1 } } as any, res as any, {} as any);
-      await collectionDiff.handler({
-        params: { previous: [{ url: 'old.js', size: 1, type: 'external' }], includeUnchanged: true },
-      } as any, res as any, {} as any);
-      await collectionDiff.handler({
-        params: {
-          previous: [
-            { url: 'a.js', size: 1, type: 'external' },
-            { url: 'same.js', size: 2, type: 'external' },
-          ],
-          current: [
-            { url: 'a.js', size: 3, type: 'external' },
-            { url: 'same.js', size: 2, type: 'external' },
-          ],
-          includeUnchanged: true,
-        },
-      } as any, res as any, {} as any);
-      await collectionDiff.handler({
-        params: {
-          previous: [{ url: 'same.js', size: 2, type: 'external' }],
-          current: [{ url: 'same.js', size: 2, type: 'external' }],
-          includeUnchanged: false,
-        },
-      } as any, res as any, {} as any);
+      await invokeTool(collectCode as unknown as ToolDefinitionHarness, { url: 'https://example.com' }, res);
+      await invokeTool(collectCode as unknown as ToolDefinitionHarness, { url: 'https://example.com', returnMode: 'summary' }, res);
+      await invokeTool(collectCode as unknown as ToolDefinitionHarness, { url: 'https://example.com', returnMode: 'pattern', pattern: 'b' }, res);
+      await invokeTool(collectCode as unknown as ToolDefinitionHarness, { url: 'https://example.com', returnMode: 'pattern' }, res);
+      await invokeTool(collectCode as unknown as ToolDefinitionHarness, { url: 'https://example.com', returnMode: 'top-priority' }, res);
+      await invokeTool(searchInScripts as unknown as ToolDefinitionHarness, { pattern: 'abc', limit: 1 }, res);
+      await invokeTool(collectionDiff as unknown as ToolDefinitionHarness, {
+        previous: [{ url: 'old.js', size: 1, type: 'external' }],
+        includeUnchanged: true,
+      }, res);
+      await invokeTool(collectionDiff as unknown as ToolDefinitionHarness, {
+        previous: [
+          { url: 'a.js', size: 1, type: 'external' },
+          { url: 'same.js', size: 2, type: 'external' },
+        ],
+        current: [
+          { url: 'a.js', size: 3, type: 'external' },
+          { url: 'same.js', size: 2, type: 'external' },
+        ],
+        includeUnchanged: true,
+      }, res);
+      await invokeTool(collectionDiff as unknown as ToolDefinitionHarness, {
+        previous: [{ url: 'same.js', size: 2, type: 'external' }],
+        current: [{ url: 'same.js', size: 2, type: 'external' }],
+        includeUnchanged: false,
+      }, res);
 
-      await queryDom.handler({ params: { selector: '#x', all: false } } as any, res as any, {} as any);
-      await queryDom.handler({ params: { selector: '.x', all: true, limit: 2 } } as any, res as any, {} as any);
-      await getDomStructure.handler({ params: { maxDepth: 2, includeText: true } } as any, res as any, {} as any);
-      await findClickableElements.handler({ params: { filterText: 'x' } } as any, res as any, {} as any);
+      await invokeTool(queryDom as unknown as ToolDefinitionHarness, { selector: '#x', all: false }, res);
+      await invokeTool(queryDom as unknown as ToolDefinitionHarness, { selector: '.x', all: true, limit: 2 }, res);
+      await invokeTool(getDomStructure as unknown as ToolDefinitionHarness, { maxDepth: 2, includeText: true }, res);
+      await invokeTool(findClickableElements as unknown as ToolDefinitionHarness, { filterText: 'x' }, res);
 
-      await createHook.handler({ params: { type: 'fetch' } } as any, res as any, {} as any);
-      await injectHook.handler({ params: { hookId: 'h1' } } as any, res as any, {} as any);
-      await getHookData.handler({ params: { hookId: 'h1' } } as any, res as any, {} as any);
-      await getHookData.handler({ params: {} } as any, res as any, {} as any);
-      await getHookData.handler({ params: { hookId: 'h1', view: 'summary', maxRecords: 2 } } as any, res as any, {} as any);
-      await getHookData.handler({ params: { view: 'summary', maxRecords: 1 } } as any, res as any, {} as any);
-      await removeHook.handler({ params: { hookId: 'h1' } } as any, res as any, {} as any);
-      await removeHook.handler({ params: { hookId: 'missing' } } as any, res as any, {} as any);
+      await invokeTool(createHook as unknown as ToolDefinitionHarness, { type: 'fetch' }, res);
+      await invokeTool(injectHook as unknown as ToolDefinitionHarness, { hookId: 'h1' }, res);
+      await invokeTool(getHookData as unknown as ToolDefinitionHarness, { hookId: 'h1' }, res);
+      await invokeTool(getHookData as unknown as ToolDefinitionHarness, {}, res);
+      await invokeTool(getHookData as unknown as ToolDefinitionHarness, { hookId: 'h1', view: 'summary', maxRecords: 2 }, res);
+      await invokeTool(getHookData as unknown as ToolDefinitionHarness, { view: 'summary', maxRecords: 1 }, res);
+      await invokeTool(removeHook as unknown as ToolDefinitionHarness, { hookId: 'h1' }, res);
+      await invokeTool(removeHook as unknown as ToolDefinitionHarness, { hookId: 'missing' }, res);
 
-      await clickElement.handler({ params: { selector: '#x' } } as any, res as any, {} as any);
-      await typeText.handler({ params: { selector: '#x', text: 'abc', delay: 10 } } as any, res as any, {} as any);
-      await waitForElement.handler({ params: { selector: '#x', timeout: 100 } } as any, res as any, {} as any);
-      await getPerformanceMetrics.handler({ params: {} } as any, res as any, {} as any);
-      await saveSessionState.handler({ params: { sessionId: 's1' } } as any, res as any, {} as any);
-      await saveSessionState.handler({
-        params: {
-          sessionId: 's-empty',
-          includeCookies: false,
-          includeLocalStorage: false,
-          includeSessionStorage: false,
-        },
-      } as any, res as any, {} as any);
-      await restoreSessionState.handler({ params: { sessionId: 's1', clearStorageBeforeRestore: true } } as any, res as any, {} as any);
-      await restoreSessionState.handler({ params: { sessionId: 's1', navigateToSavedUrl: false } } as any, res as any, {} as any);
-      await listSessionStates.handler({ params: {} } as any, res as any, {} as any);
-      await dumpSessionState.handler({ params: { sessionId: 's1', pretty: false } } as any, res as any, {} as any);
+      await invokeTool(clickElement as unknown as ToolDefinitionHarness, { selector: '#x' }, res);
+      await invokeTool(typeText as unknown as ToolDefinitionHarness, { selector: '#x', text: 'abc', delay: 10 }, res);
+      await invokeTool(waitForElement as unknown as ToolDefinitionHarness, { selector: '#x', timeout: 100 }, res);
+      await invokeTool(getPerformanceMetrics as unknown as ToolDefinitionHarness, {}, res);
+      await invokeTool(saveSessionState as unknown as ToolDefinitionHarness, { sessionId: 's1' }, res);
+      await invokeTool(saveSessionState as unknown as ToolDefinitionHarness, {
+        sessionId: 's-empty',
+        includeCookies: false,
+        includeLocalStorage: false,
+        includeSessionStorage: false,
+      }, res);
+      await invokeTool(restoreSessionState as unknown as ToolDefinitionHarness, { sessionId: 's1', clearStorageBeforeRestore: true }, res);
+      await invokeTool(restoreSessionState as unknown as ToolDefinitionHarness, { sessionId: 's1', navigateToSavedUrl: false }, res);
+      await invokeTool(listSessionStates as unknown as ToolDefinitionHarness, {}, res);
+      await invokeTool(dumpSessionState as unknown as ToolDefinitionHarness, { sessionId: 's1', pretty: false }, res);
       const tempDir = await mkdtemp(join(tmpdir(), 'js-reverse-mcp-'));
       const snapshotPath = join(tempDir, 'session-s1.json');
       const encryptedSnapshotPath = join(tempDir, 'session-s1.encrypted.json');
       const originalEncryptionKey = process.env.SESSION_STATE_ENCRYPTION_KEY;
       try {
-        await dumpSessionState.handler({ params: { sessionId: 's1', path: snapshotPath } } as any, res as any, {} as any);
+        await invokeTool(dumpSessionState as unknown as ToolDefinitionHarness, { sessionId: 's1', path: snapshotPath }, res);
         const snapshotJson = await readFile(snapshotPath, 'utf8');
         process.env.SESSION_STATE_ENCRYPTION_KEY = 'unit-test-session-key';
-        await dumpSessionState.handler({
-          params: { sessionId: 's1', path: encryptedSnapshotPath, encrypt: true },
-        } as any, res as any, {} as any);
-        await loadSessionState.handler({
-          params: { path: encryptedSnapshotPath, sessionId: 's1-encrypted', overwrite: true },
-        } as any, res as any, {} as any);
+        await invokeTool(dumpSessionState as unknown as ToolDefinitionHarness, {
+          sessionId: 's1',
+          path: encryptedSnapshotPath,
+          encrypt: true,
+        }, res);
+        await invokeTool(loadSessionState as unknown as ToolDefinitionHarness, {
+          path: encryptedSnapshotPath,
+          sessionId: 's1-encrypted',
+          overwrite: true,
+        }, res);
         process.env.SESSION_STATE_ENCRYPTION_KEY = '';
         await assert.rejects(async () => {
-          await dumpSessionState.handler({
-            params: { sessionId: 's1', path: encryptedSnapshotPath, encrypt: true },
-          } as any, res as any, {} as any);
+          await invokeTool(dumpSessionState as unknown as ToolDefinitionHarness, {
+            sessionId: 's1',
+            path: encryptedSnapshotPath,
+            encrypt: true,
+          }, res);
         });
         await assert.rejects(async () => {
-          await loadSessionState.handler({
-            params: { path: encryptedSnapshotPath, sessionId: 's1-encrypted-2', overwrite: true },
-          } as any, res as any, {} as any);
+          await invokeTool(loadSessionState as unknown as ToolDefinitionHarness, {
+            path: encryptedSnapshotPath,
+            sessionId: 's1-encrypted-2',
+            overwrite: true,
+          }, res);
         });
-        await deleteSessionState.handler({ params: { sessionId: 's1' } } as any, res as any, {} as any);
-        await loadSessionState.handler({ params: { snapshotJson, sessionId: 's1' } } as any, res as any, {} as any);
+        await invokeTool(deleteSessionState as unknown as ToolDefinitionHarness, { sessionId: 's1' }, res);
+        await invokeTool(loadSessionState as unknown as ToolDefinitionHarness, { snapshotJson, sessionId: 's1' }, res);
         await assert.rejects(async () => {
-          await loadSessionState.handler({ params: { snapshotJson, sessionId: 's1' } } as any, res as any, {} as any);
+          await invokeTool(loadSessionState as unknown as ToolDefinitionHarness, { snapshotJson, sessionId: 's1' }, res);
         });
-        await loadSessionState.handler({ params: { path: snapshotPath, sessionId: 's1', overwrite: true } } as any, res as any, {} as any);
+        await invokeTool(loadSessionState as unknown as ToolDefinitionHarness, { path: snapshotPath, sessionId: 's1', overwrite: true }, res);
 
         const expiredSnapshotJson = JSON.stringify({
           id: 'expired-one',
@@ -441,42 +545,42 @@ describe('jshook tools handlers', () => {
           localStorage: {},
           sessionStorage: {},
         });
-        await loadSessionState.handler({ params: { snapshotJson: expiredSnapshotJson, overwrite: true } } as any, res as any, {} as any);
-        await listSessionStates.handler({ params: {} } as any, res as any, {} as any);
+        await invokeTool(loadSessionState as unknown as ToolDefinitionHarness, { snapshotJson: expiredSnapshotJson, overwrite: true }, res);
+        await invokeTool(listSessionStates as unknown as ToolDefinitionHarness, {}, res);
       } finally {
         process.env.SESSION_STATE_ENCRYPTION_KEY = originalEncryptionKey;
         await rm(tempDir, {recursive: true, force: true});
       }
       await assert.rejects(async () => {
-        await restoreSessionState.handler({ params: { sessionId: 'missing-session' } } as any, res as any, {} as any);
+        await invokeTool(restoreSessionState as unknown as ToolDefinitionHarness, { sessionId: 'missing-session' }, res);
       });
       await assert.rejects(async () => {
-        await dumpSessionState.handler({ params: { sessionId: 'missing-session' } } as any, res as any, {} as any);
+        await invokeTool(dumpSessionState as unknown as ToolDefinitionHarness, { sessionId: 'missing-session' }, res);
       });
       await assert.rejects(async () => {
-        await loadSessionState.handler({ params: {} } as any, res as any, {} as any);
+        await invokeTool(loadSessionState as unknown as ToolDefinitionHarness, {}, res);
       });
       await assert.rejects(async () => {
-        await loadSessionState.handler({ params: { snapshotJson: '{bad json}' } } as any, res as any, {} as any);
+        await invokeTool(loadSessionState as unknown as ToolDefinitionHarness, { snapshotJson: '{bad json}' }, res);
       });
       await assert.rejects(async () => {
-        await loadSessionState.handler({ params: { snapshotJson: '1' } } as any, res as any, {} as any);
+        await invokeTool(loadSessionState as unknown as ToolDefinitionHarness, { snapshotJson: '1' }, res);
       });
-      await checkBrowserHealth.handler({ params: {} } as any, res as any, {} as any);
+      await invokeTool(checkBrowserHealth as unknown as ToolDefinitionHarness, {}, res);
       runtime.browserManager.getBrowser = () => ({isConnected: () => false});
       runtime.pageController.getPage = async () => {
         throw new Error('no page');
       };
-      await checkBrowserHealth.handler({ params: {} } as any, res as any, {} as any);
-      runtime.pageController.getPage = async () => activePage as any;
+      await invokeTool(checkBrowserHealth as unknown as ToolDefinitionHarness, {}, res);
+      runtime.pageController.getPage = async () => activePage;
 
-      await injectStealth.handler({ params: { preset: 'windows-chrome' } } as any, res as any, {} as any);
-      await listStealthPresets.handler({ params: {} } as any, res as any, {} as any);
-      await listStealthFeatures.handler({ params: {} } as any, res as any, {} as any);
-      await setUserAgent.handler({ params: { userAgent: 'ua-test' } } as any, res as any, {} as any);
+      await invokeTool(injectStealth as unknown as ToolDefinitionHarness, { preset: 'windows-chrome' }, res);
+      await invokeTool(listStealthPresets as unknown as ToolDefinitionHarness, {}, res);
+      await invokeTool(listStealthFeatures as unknown as ToolDefinitionHarness, {}, res);
+      await invokeTool(setUserAgent as unknown as ToolDefinitionHarness, { userAgent: 'ua-test' }, res);
 
       await assert.rejects(async () => {
-        await injectHook.handler({ params: { hookId: 'missing' } } as any, res as any, {} as any);
+        await invokeTool(injectHook as unknown as ToolDefinitionHarness, { hookId: 'missing' }, res);
       });
 
       assert.ok(res.lines.some((line) => line.includes('Hook injected: h1')));
@@ -541,8 +645,8 @@ describe('jshook tools handlers', () => {
       runtime.pageController.evaluate = originals.evaluate;
       runtime.collector.getActivePage = originals.getActivePage;
       runtime.browserManager.getBrowser = originals.getBrowser;
-      (StealthScripts2025 as any).injectAll = originals.injectAll;
-      (StealthScripts2025 as any).getPresets = originals.getPresets;
+      stealth.injectAll = originals.injectAll;
+      stealth.getPresets = originals.getPresets;
     }
   });
 });

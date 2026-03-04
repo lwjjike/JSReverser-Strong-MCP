@@ -1,7 +1,33 @@
-import { beforeEach, afterEach, describe, it } from 'node:test';
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { beforeEach, afterEach, describe, it } from 'node:test';
+
 import { BrowserManager } from '../../../src/browser.js';
 import { StealthScripts2025 } from '../../../src/modules/stealth/StealthScripts2025.js';
+
+interface ResettableStealthScripts {
+  injectAll: typeof StealthScripts2025.injectAll;
+}
+
+interface BrowserLike {
+  connected: boolean;
+  close(): Promise<void>;
+  on(event: string, handler: unknown): void;
+  pages?(): Promise<unknown[]>;
+}
+
+interface BrowserManagerLike {
+  browser?: BrowserLike;
+  connectToRemoteBrowser(): Promise<BrowserLike>;
+  launchBrowser(): Promise<BrowserLike>;
+  close(): Promise<void>;
+  ensureBrowser(): Promise<BrowserLike>;
+}
 
 describe('BrowserManager mocked', () => {
   let originalInjectAll: typeof StealthScripts2025.injectAll;
@@ -12,7 +38,7 @@ describe('BrowserManager mocked', () => {
   });
 
   afterEach(async () => {
-    (StealthScripts2025 as any).injectAll = originalInjectAll;
+    (StealthScripts2025 as unknown as ResettableStealthScripts).injectAll = originalInjectAll;
     try {
       const manager = BrowserManager.getInstance({
         headless: true,
@@ -31,10 +57,10 @@ describe('BrowserManager mocked', () => {
       isolated: true,
     });
     const existing = { connected: true };
-    (manager as any).browser = existing;
+    (manager as unknown as BrowserManagerLike).browser = existing as BrowserLike;
 
     const browser = await manager.ensureBrowser();
-    assert.strictEqual(browser, existing as any);
+    assert.strictEqual(browser, existing);
   });
 
   it('selects remote connect or launch path', async () => {
@@ -44,9 +70,13 @@ describe('BrowserManager mocked', () => {
       isolated: true,
     });
     let remoteCalled = 0;
-    (remote as any).connectToRemoteBrowser = async () => {
+    (remote as unknown as BrowserManagerLike).connectToRemoteBrowser = async () => {
       remoteCalled += 1;
-      return { connected: true };
+      return {
+        connected: true,
+        close: async () => undefined,
+        on: () => undefined,
+      };
     };
     await remote.ensureBrowser();
     assert.strictEqual(remoteCalled, 1);
@@ -58,9 +88,13 @@ describe('BrowserManager mocked', () => {
       isolated: true,
     });
     let launchCalled = 0;
-    (local as any).launchBrowser = async () => {
+    (local as unknown as BrowserManagerLike).launchBrowser = async () => {
       launchCalled += 1;
-      return { connected: true };
+      return {
+        connected: true,
+        close: async () => undefined,
+        on: () => undefined,
+      };
     };
     await local.ensureBrowser();
     assert.strictEqual(launchCalled, 1);
@@ -74,22 +108,30 @@ describe('BrowserManager mocked', () => {
 
     const pageA = { id: 'a' };
     const pageB = { id: 'b' };
-    let onTargetCreated: any = null;
-    const browser = {
+    type TargetCreatedHandler = (target: {type(): string; page(): Promise<{id: string}>}) => Promise<void>;
+    let onTargetCreated: TargetCreatedHandler | null = null;
+    const browser: BrowserLike = {
       pages: async () => [pageA, pageB],
-      on: (event: string, handler: (target: any) => Promise<void>) => {
+      on: (event: string, handler: unknown) => {
         if (event === 'targetcreated') {
-          onTargetCreated = handler;
+          onTargetCreated = handler as TargetCreatedHandler;
         }
       },
-      close: async () => {},
+      close: async () => undefined,
       connected: true,
     };
-    (manager as any).browser = browser;
+    (manager as unknown as BrowserManagerLike).browser = browser;
 
     let injectedCount = 0;
-    (StealthScripts2025 as any).injectAll = async () => {
+    (StealthScripts2025 as unknown as ResettableStealthScripts).injectAll = async () => {
       injectedCount += 1;
+      return {
+        preset: 'linux-chrome',
+        injectedFeatures: ['mockChrome'],
+        skippedFeatures: [],
+        userAgent: 'mock-agent',
+        platform: 'Linux x86_64',
+      };
     };
 
     await manager.injectStealth('linux-chrome', { mockConnection: false });
@@ -98,8 +140,11 @@ describe('BrowserManager mocked', () => {
     await manager.injectStealth();
     assert.strictEqual(injectedCount, 2);
 
-    assert.ok(onTargetCreated);
-    await onTargetCreated!({
+    if (!onTargetCreated) {
+      throw new Error('expected targetcreated handler');
+    }
+    const targetCreatedHandler: TargetCreatedHandler = onTargetCreated;
+    await targetCreatedHandler({
       type: () => 'page',
       page: async () => ({ id: 'c' }),
     });
@@ -119,14 +164,14 @@ describe('BrowserManager mocked', () => {
       /Browser not initialized/,
     );
 
-    (manager as any).browser = {
+    (manager as unknown as BrowserManagerLike).browser = {
       pages: async () => [{}],
-      on: () => {},
-      close: async () => {},
+      on: () => undefined,
+      close: async () => undefined,
       connected: true,
     };
 
-    (StealthScripts2025 as any).injectAll = async () => {
+    (StealthScripts2025 as unknown as ResettableStealthScripts).injectAll = async () => {
       throw new Error('inject failed');
     };
 
@@ -149,13 +194,13 @@ describe('BrowserManager mocked', () => {
     });
 
     let closeCalled = 0;
-    (manager as any).browser = {
+    (manager as unknown as BrowserManagerLike).browser = {
       connected: true,
       close: async () => {
         closeCalled += 1;
         throw new Error('close fail');
       },
-      on: () => {},
+      on: () => undefined,
     };
 
     await manager.close();
@@ -163,12 +208,16 @@ describe('BrowserManager mocked', () => {
     assert.strictEqual(manager.isConnected(), false);
 
     let restarted = 0;
-    (manager as any).close = async () => {
+    (manager as unknown as BrowserManagerLike).close = async () => {
       restarted += 1;
     };
-    (manager as any).ensureBrowser = async () => {
+    (manager as unknown as BrowserManagerLike).ensureBrowser = async () => {
       restarted += 1;
-      return { connected: true };
+      return {
+        connected: true,
+        close: async () => undefined,
+        on: () => undefined,
+      };
     };
     await manager.restart();
     assert.strictEqual(restarted, 2);

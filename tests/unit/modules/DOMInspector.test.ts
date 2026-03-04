@@ -1,5 +1,11 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import { DOMInspector } from '../../../src/modules/collector/DOMInspector.js';
 
 function makePage(results: Array<unknown | Error> = []) {
@@ -11,7 +17,7 @@ function makePage(results: Array<unknown | Error> = []) {
       }
       return next;
     },
-    waitForSelector: async () => {},
+    waitForSelector: async () => undefined,
   };
 }
 
@@ -28,7 +34,9 @@ describe('DOMInspector', () => {
       '//*[@id="root"]',
       true,
     ]);
-    const inspector = new DOMInspector({ getActivePage: async () => page } as any);
+    const inspector = new DOMInspector({
+      getActivePage: async () => page,
+    } as unknown as ConstructorParameters<typeof DOMInspector>[0]);
 
     const one = await inspector.querySelector('#submit');
     assert.strictEqual(one.found, true);
@@ -60,20 +68,25 @@ describe('DOMInspector', () => {
 
   it('covers observer start/stop and close with cdp session', async () => {
     const page = makePage([undefined, undefined]);
-    const inspector = new DOMInspector({ getActivePage: async () => page } as any);
+    const inspector = new DOMInspector({
+      getActivePage: async () => page,
+    } as unknown as ConstructorParameters<typeof DOMInspector>[0]);
 
     await inspector.observeDOMChanges({ subtree: true });
     await inspector.stopObservingDOM();
 
     let detached = 0;
-    (inspector as any).cdpSession = {
+    (inspector as unknown as { cdpSession: { detach(): Promise<void> } | null }).cdpSession = {
       detach: async () => {
         detached += 1;
       },
     };
     await inspector.close();
     assert.strictEqual(detached, 1);
-    assert.strictEqual((inspector as any).cdpSession, null);
+    assert.strictEqual(
+      (inspector as unknown as { cdpSession: { detach(): Promise<void> } | null }).cdpSession,
+      null,
+    );
   });
 
   it('handles failure branches', async () => {
@@ -81,7 +94,9 @@ describe('DOMInspector', () => {
     failPage.evaluate = async () => {
       throw new Error('x');
     };
-    const inspector = new DOMInspector({ getActivePage: async () => failPage } as any);
+    const inspector = new DOMInspector({
+      getActivePage: async () => failPage,
+    } as unknown as ConstructorParameters<typeof DOMInspector>[0]);
 
     const none = await inspector.querySelector('#none');
     assert.strictEqual(none.found, false);

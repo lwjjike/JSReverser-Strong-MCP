@@ -35,6 +35,7 @@ import * as jshookHookTools from './tools/hook.js';
 import * as jshookStealthTools from './tools/stealth.js';
 import * as jshookDomTools from './tools/dom.js';
 import * as jshookPageTools from './tools/page.js';
+import * as jshookRebuildTools from './tools/rebuild.js';
 import * as websocketTools from './tools/websocket.js';
 import {ErrorCodes, formatError} from './utils/errors.js';
 import {TokenBudgetManager} from './utils/TokenBudgetManager.js';
@@ -218,6 +219,7 @@ const toolSources: Array<{source: string; tools: ToolDefinition[]}> = [
   {source: 'jshookStealth', tools: asTools(jshookStealthTools)},
   {source: 'jshookDom', tools: asTools(jshookDomTools)},
   {source: 'jshookPage', tools: asTools(jshookPageTools)},
+  {source: 'jshookRebuild', tools: asTools(jshookRebuildTools)},
   {source: 'websocket', tools: asTools(websocketTools)},
 ];
 

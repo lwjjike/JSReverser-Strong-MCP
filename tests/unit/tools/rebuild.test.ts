@@ -265,4 +265,98 @@ describe('rebuild bridge tools', () => {
       await rm(rootDir, {recursive: true, force: true});
     }
   });
+
+  it('matches weird targets through function names and action descriptions without relying on obvious parameter names', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'js-reverse-rebuild-function-target-'));
+    const runtime = getJSHookRuntime();
+    const originalStore = runtime.reverseTaskStore;
+    const originals = {
+      getTopPriorityFiles: runtime.collector.getTopPriorityFiles,
+      getCookies: runtime.pageController.getCookies,
+      getLocalStorage: runtime.pageController.getLocalStorage,
+      getSessionStorage: runtime.pageController.getSessionStorage,
+      getPage: runtime.pageController.getPage,
+    };
+    runtime.reverseTaskStore = new ReverseTaskStore({rootDir});
+
+    try {
+      const task = await runtime.reverseTaskStore.openTask({
+        taskId: 'task-004',
+        slug: 'weird-param',
+        targetUrl: 'https://example.com/order',
+        goal: 'find weird param',
+      });
+      await task.appendLog('runtime-evidence', {
+        source: 'hook',
+        actionDescription: 'click submit order button',
+        functionName: 'computeQtk9',
+        requestUrl: 'https://example.com/api/checkout',
+        bodyPreview: '{"qtk9":"abc"}',
+      });
+      await task.appendLog('runtime-evidence', {
+        source: 'hook',
+        actionDescription: 'page idle telemetry',
+        functionName: 'trackHeartbeat',
+        requestUrl: 'https://example.com/api/metrics',
+        bodyPreview: '{"ping":1}',
+      });
+
+      runtime.collector.getTopPriorityFiles = () => ({
+        files: [
+          {
+            url: 'https://example.com/static/checkout.js',
+            content: 'function computeQtk9() { return "abc"; }',
+            size: 42,
+            type: 'external',
+          },
+          {
+            url: 'https://example.com/static/telemetry.js',
+            content: 'function trackHeartbeat() { return 1; }',
+            size: 38,
+            type: 'external',
+          },
+        ],
+        totalSize: 80,
+        totalFiles: 2,
+      });
+      runtime.pageController.getCookies = async () => [{name: 'sid', value: 'checkout-user'}];
+      runtime.pageController.getLocalStorage = async () => ({order_seed: 'seed-2'});
+      runtime.pageController.getSessionStorage = async () => ({order_nonce: 'nonce-2'});
+      runtime.pageController.getPage = async () => ({
+        url: () => 'https://example.com/order',
+        title: async () => 'Checkout',
+      } as Awaited<ReturnType<typeof runtime.pageController.getPage>>);
+
+      const response = makeResponse();
+      await exportRebuildBundle.handler({
+        params: {
+          taskId: 'task-004',
+          taskSlug: 'weird-param',
+          targetUrl: 'https://example.com/order',
+          goal: 'find weird param',
+          autoGenerate: true,
+          targetFunctionNames: ['computeQtk9'],
+          targetActionDescription: 'submit order button',
+        },
+      } as unknown as Parameters<typeof exportRebuildBundle.handler>[0], response as unknown as Parameters<typeof exportRebuildBundle.handler>[1], {} as Parameters<typeof exportRebuildBundle.handler>[2]);
+
+      const capture = JSON.parse(await readFile(path.join(rootDir, 'task-004', 'env', 'capture.json'), 'utf8')) as Record<string, unknown>;
+      const runtimeEvidence = capture.runtimeEvidence as Array<Record<string, unknown>>;
+      const filteredScript = capture.targetScript as Record<string, unknown>;
+
+      assert.strictEqual(runtimeEvidence.length, 1);
+      assert.strictEqual(runtimeEvidence[0].functionName, 'computeQtk9');
+      assert.strictEqual(filteredScript.url, 'https://example.com/static/checkout.js');
+      assert.ok(!JSON.stringify(capture).includes('trackHeartbeat'));
+      assert.ok(!JSON.stringify(capture).includes('telemetry'));
+    } finally {
+      runtime.reverseTaskStore = originalStore;
+      runtime.collector.getTopPriorityFiles = originals.getTopPriorityFiles;
+      runtime.pageController.getCookies = originals.getCookies;
+      runtime.pageController.getLocalStorage = originals.getLocalStorage;
+      runtime.pageController.getSessionStorage = originals.getSessionStorage;
+      runtime.pageController.getPage = originals.getPage;
+      await rm(rootDir, {recursive: true, force: true});
+    }
+  });
 });

@@ -96,21 +96,38 @@ function matchesTargetText(
   value: unknown,
   targetKeywords: string[],
   targetUrlPatterns: string[],
+  targetFunctionNames: string[],
+  targetActionDescription: string,
 ): boolean {
   const text = typeof value === 'string' ? value.toLowerCase() : JSON.stringify(value ?? '').toLowerCase();
   return targetKeywords.some((keyword) => text.includes(keyword.toLowerCase())) ||
-    targetUrlPatterns.some((pattern) => text.includes(pattern.toLowerCase()));
+    targetUrlPatterns.some((pattern) => text.includes(pattern.toLowerCase())) ||
+    targetFunctionNames.some((functionName) => text.includes(functionName.toLowerCase())) ||
+    (targetActionDescription.length > 0 && text.includes(targetActionDescription.toLowerCase()));
 }
 
 function filterRuntimeEvidence(
   records: Record<string, unknown>[],
   targetKeywords: string[],
   targetUrlPatterns: string[],
+  targetFunctionNames: string[],
+  targetActionDescription: string,
   maxEvidenceItems: number,
 ): Record<string, unknown>[] {
-  const filtered = (targetKeywords.length === 0 && targetUrlPatterns.length === 0)
+  const filtered = (
+    targetKeywords.length === 0 &&
+    targetUrlPatterns.length === 0 &&
+    targetFunctionNames.length === 0 &&
+    targetActionDescription.length === 0
+  )
     ? records
-    : records.filter((record) => matchesTargetText(record, targetKeywords, targetUrlPatterns));
+    : records.filter((record) => matchesTargetText(
+      record,
+      targetKeywords,
+      targetUrlPatterns,
+      targetFunctionNames,
+      targetActionDescription,
+    ));
   return filtered.slice(0, maxEvidenceItems);
 }
 
@@ -118,11 +135,24 @@ function pickTargetScript(
   files: CodeFile[],
   targetKeywords: string[],
   targetUrlPatterns: string[],
+  targetFunctionNames: string[],
+  targetActionDescription: string,
 ): CodeFile | undefined {
-  if (targetKeywords.length === 0 && targetUrlPatterns.length === 0) {
+  if (
+    targetKeywords.length === 0 &&
+    targetUrlPatterns.length === 0 &&
+    targetFunctionNames.length === 0 &&
+    targetActionDescription.length === 0
+  ) {
     return files[0];
   }
-  return files.find((file) => matchesTargetText(file, targetKeywords, targetUrlPatterns)) ?? files[0];
+  return files.find((file) => matchesTargetText(
+    file,
+    targetKeywords,
+    targetUrlPatterns,
+    targetFunctionNames,
+    targetActionDescription,
+  )) ?? files[0];
 }
 
 async function buildAutoBundle(
@@ -131,6 +161,8 @@ async function buildAutoBundle(
   options: {
     targetKeywords: string[];
     targetUrlPatterns: string[];
+    targetFunctionNames: string[];
+    targetActionDescription: string;
     maxEvidenceItems: number;
   },
 ): Promise<{
@@ -141,7 +173,13 @@ async function buildAutoBundle(
   notes: string[];
 }> {
   const topPriority = runtime.collector.getTopPriorityFiles(1);
-  const targetScript = pickTargetScript(topPriority.files, options.targetKeywords, options.targetUrlPatterns);
+  const targetScript = pickTargetScript(
+    topPriority.files,
+    options.targetKeywords,
+    options.targetUrlPatterns,
+    options.targetFunctionNames,
+    options.targetActionDescription,
+  );
   const page = await runtime.pageController.getPage();
   const [cookies, localStorage, sessionStorage, runtimeEvidence] = await Promise.all([
     runtime.pageController.getCookies(),
@@ -153,6 +191,8 @@ async function buildAutoBundle(
     runtimeEvidence,
     options.targetKeywords,
     options.targetUrlPatterns,
+    options.targetFunctionNames,
+    options.targetActionDescription,
     options.maxEvidenceItems,
   );
 
@@ -240,6 +280,8 @@ export const exportRebuildBundle = defineTool({
     autoGenerate: zod.boolean().optional(),
     targetKeywords: zod.array(zod.string()).optional(),
     targetUrlPatterns: zod.array(zod.string()).optional(),
+    targetFunctionNames: zod.array(zod.string()).optional(),
+    targetActionDescription: zod.string().optional(),
     maxEvidenceItems: zod.number().int().positive().optional(),
     entryCode: zod.string().optional(),
     envCode: zod.string().optional(),
@@ -260,6 +302,8 @@ export const exportRebuildBundle = defineTool({
       ? await buildAutoBundle(request.params.taskId, runtime, {
           targetKeywords: request.params.targetKeywords ?? [],
           targetUrlPatterns: request.params.targetUrlPatterns ?? [],
+          targetFunctionNames: request.params.targetFunctionNames ?? [],
+          targetActionDescription: request.params.targetActionDescription ?? '',
           maxEvidenceItems: request.params.maxEvidenceItems ?? 20,
         })
       : {

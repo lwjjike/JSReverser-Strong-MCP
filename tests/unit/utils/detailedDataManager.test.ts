@@ -1,10 +1,43 @@
-import { describe, it, beforeEach } from 'node:test';
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it, beforeEach } from 'node:test';
+
 import { DetailedDataManager } from '../../../src/utils/detailedDataManager.js';
+
+interface ResettableDetailedDataManager {
+  instance?: unknown;
+}
+
+interface SmartHandledResult {
+  detailId: string;
+  summary: {
+    type: string;
+    preview: string;
+  };
+  expiresAt: number;
+}
+
+interface FullDetailedDataManager {
+  store(data: unknown, ttlMs?: number): string;
+  retrieve(detailId: string, path?: string): unknown;
+  getStats(): {
+    cacheSize: number;
+    totalSizeKB: string;
+    avgAccessCount: string;
+    autoExtendEnabled: boolean;
+  };
+  getDetailedStats(): Array<{detailId: string; remainingSeconds: number}>;
+  clear(): void;
+}
 
 describe('DetailedDataManager', () => {
   beforeEach(() => {
-    (DetailedDataManager as any).instance = undefined;
+    (DetailedDataManager as unknown as ResettableDetailedDataManager).instance = undefined;
   });
 
   it('returns original data for small payload in smartHandle', () => {
@@ -17,7 +50,7 @@ describe('DetailedDataManager', () => {
   it('returns summary response for large payload in smartHandle', () => {
     const manager = DetailedDataManager.getInstance();
     const data = { text: 'x'.repeat(3000), fn: () => 'ok' };
-    const result = manager.smartHandle(data, 10) as any;
+    const result = manager.smartHandle(data, 10) as SmartHandledResult;
 
     assert.ok(result.detailId.startsWith('detail_'));
     assert.strictEqual(result.summary.type, 'object');
@@ -65,7 +98,7 @@ describe('DetailedDataManager', () => {
   });
 
   it('evicts least recently used entry when cache is full', () => {
-    const manager = DetailedDataManager.getInstance() as any;
+    const manager = DetailedDataManager.getInstance() as unknown as FullDetailedDataManager;
     const ids: string[] = [];
 
     for (let i = 0; i < 100; i++) {
@@ -99,4 +132,3 @@ describe('DetailedDataManager', () => {
     assert.strictEqual(manager.getStats().cacheSize, 0);
   });
 });
-

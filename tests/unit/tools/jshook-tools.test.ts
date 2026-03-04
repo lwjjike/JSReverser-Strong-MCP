@@ -1,11 +1,17 @@
-import {describe, it} from 'node:test';
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import {describe, it} from 'node:test';
+
 import {zod} from '../../../src/third_party/index.js';
-import {collectCode, collectionDiff} from '../../../src/tools/collector.js';
 import {analyzeTarget, riskPanel, summarizeCode, exportSessionReport} from '../../../src/tools/analyzer.js';
-import {createHook, getHookData} from '../../../src/tools/hook.js';
-import {injectStealth} from '../../../src/tools/stealth.js';
+import {collectCode, collectionDiff} from '../../../src/tools/collector.js';
 import {queryDom} from '../../../src/tools/dom.js';
+import {createHook, getHookData} from '../../../src/tools/hook.js';
 import {
   clickElement,
   checkBrowserHealth,
@@ -16,6 +22,7 @@ import {
   restoreSessionState,
   saveSessionState,
 } from '../../../src/tools/page.js';
+import {injectStealth} from '../../../src/tools/stealth.js';
 
 describe('jshook tools schema', () => {
   it('validates collect_code schema', () => {

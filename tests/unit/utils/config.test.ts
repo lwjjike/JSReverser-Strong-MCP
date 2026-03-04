@@ -1,3 +1,9 @@
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /**
  * Unit tests for configuration management
  * Tests configuration loading, validation, and environment variable parsing
@@ -5,8 +11,9 @@
  * Requirements: 11.3, 11.4, 11.5
  */
 
-import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
+import { describe, it, beforeEach, afterEach } from 'node:test';
+
 import {
   getDefaultLLMProvider,
   getAIConfig,
@@ -18,7 +25,6 @@ import {
   createAIService,
   type SystemConfig,
   type AIConfig,
-  type BrowserConfig,
 } from '../../../src/utils/config.js';
 
 describe('Configuration Management', () => {

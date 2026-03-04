@@ -114,6 +114,10 @@ describe('reverse task tools', () => {
           targetUrl: 'https://example.com',
           goal: 'rebuild signature',
           channel: 'runtime-evidence',
+          targetKeywords: ['sign', 'nonce'],
+          targetUrlPatterns: ['https://example.com/api/sign'],
+          targetFunctionNames: ['signPayload'],
+          targetActionDescription: 'click submit order button',
           entry: {
             source: 'hook',
             note: 'captured sign parameters',
@@ -130,6 +134,22 @@ describe('reverse task tools', () => {
       assert.strictEqual(recorded.length, 1);
       assert.strictEqual(recorded[0].source, 'hook');
       assert.strictEqual(recorded[0].note, 'captured sign parameters');
+      assert.deepStrictEqual(recorded[0].targetContext, {
+        targetKeywords: ['sign', 'nonce'],
+        targetUrlPatterns: ['https://example.com/api/sign'],
+        targetFunctionNames: ['signPayload'],
+        targetActionDescription: 'click submit order button',
+      });
+
+      const targetContext = JSON.parse(
+        await readFile(path.join(rootDir, 'task-001', 'target-context.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      assert.deepStrictEqual(targetContext, {
+        targetKeywords: ['sign', 'nonce'],
+        targetUrlPatterns: ['https://example.com/api/sign'],
+        targetFunctionNames: ['signPayload'],
+        targetActionDescription: 'click submit order button',
+      });
 
       const analyzeResponse = makeResponse();
       await analyzeTarget.handler({

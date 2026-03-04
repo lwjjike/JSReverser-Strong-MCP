@@ -748,6 +748,10 @@ export const recordReverseEvidence = defineTool({
     targetUrl: zod.string(),
     goal: zod.string(),
     channel: zod.string().default('runtime-evidence'),
+    targetKeywords: zod.array(zod.string()).optional(),
+    targetUrlPatterns: zod.array(zod.string()).optional(),
+    targetFunctionNames: zod.array(zod.string()).optional(),
+    targetActionDescription: zod.string().optional(),
     entry: zod.record(zod.string(), zod.unknown()),
   },
   handler: async (request, response) => {
@@ -758,7 +762,32 @@ export const recordReverseEvidence = defineTool({
       targetUrl: request.params.targetUrl,
       goal: request.params.goal,
     });
-    await task.appendLog(request.params.channel, request.params.entry);
+    const targetContext = {
+      targetKeywords: request.params.targetKeywords ?? [],
+      targetUrlPatterns: request.params.targetUrlPatterns ?? [],
+      targetFunctionNames: request.params.targetFunctionNames ?? [],
+      targetActionDescription: request.params.targetActionDescription ?? '',
+    };
+    const hasTargetContext = targetContext.targetKeywords.length > 0 ||
+      targetContext.targetUrlPatterns.length > 0 ||
+      targetContext.targetFunctionNames.length > 0 ||
+      targetContext.targetActionDescription.length > 0;
+
+    await task.appendLog(request.params.channel, {
+      ...request.params.entry,
+      ...(hasTargetContext ? {targetContext} : {}),
+    });
+
+    if (hasTargetContext) {
+      const existingTargetContext = await runtime.reverseTaskStore.readSnapshot<Record<string, unknown>>(
+        request.params.taskId,
+        'target-context.json',
+      );
+      await task.writeSnapshot('target-context.json', {
+        ...existingTargetContext,
+        ...targetContext,
+      });
+    }
 
     response.appendResponseLine('```json');
     response.appendResponseLine(JSON.stringify({
@@ -766,6 +795,7 @@ export const recordReverseEvidence = defineTool({
       taskId: task.taskId,
       taskDir: task.taskDir,
       channel: request.params.channel,
+      targetContext: hasTargetContext ? targetContext : undefined,
     }, null, 2));
     response.appendResponseLine('```');
   },

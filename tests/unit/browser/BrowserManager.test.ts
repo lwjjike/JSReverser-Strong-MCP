@@ -1,3 +1,9 @@
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /**
  * Unit tests for BrowserManager
  * Tests browser launch, close, singleton pattern, and crash recovery
@@ -5,10 +11,10 @@
  * Requirements: 9.1, 9.2, 9.3, 9.4, 9.7
  */
 
-import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert';
+import { describe, it, beforeEach, afterEach } from 'node:test';
+
 import { BrowserManager } from '../../../src/browser.js';
-import type { Browser } from '../../../src/third_party/index.js';
 
 const runBrowserTests = process.env.RUN_BROWSER_TESTS === 'true';
 
@@ -64,7 +70,7 @@ describe('BrowserManager', {skip: !runBrowserTests}, () => {
     });
 
     it('should reset instance with resetInstance method', () => {
-      const manager1 = BrowserManager.getInstance({
+      BrowserManager.getInstance({
         headless: true,
         isolated: true,
       });

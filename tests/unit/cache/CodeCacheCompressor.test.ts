@@ -1,7 +1,20 @@
-import {describe, it} from 'node:test';
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import {describe, it} from 'node:test';
+
 import {CodeCache} from '../../../src/modules/collector/CodeCache.js';
 import {CodeCompressor} from '../../../src/modules/collector/CodeCompressor.js';
+
+interface MutableCodeCache {
+  MAX_MEMORY_CACHE_SIZE: number;
+  memoryCache: Map<string, unknown>;
+  generateKey(url: string, options?: unknown): string;
+}
 
 describe('Code cache and compressor', () => {
   it('stores and retrieves cache entries', async () => {
@@ -41,7 +54,8 @@ describe('Code cache and compressor', () => {
     });
     await cache.init();
 
-    (cache as any).MAX_MEMORY_CACHE_SIZE = 1;
+    const mutableCache = cache as unknown as MutableCodeCache;
+    mutableCache.MAX_MEMORY_CACHE_SIZE = 1;
     await cache.set(
       'https://example.com/a',
       { files: [{url: 'a.js', content: 'a'.repeat(20), size: 20, type: 'external'}], dependencies: {nodes: [], edges: []}, totalSize: 20, collectTime: 1 },
@@ -52,10 +66,10 @@ describe('Code cache and compressor', () => {
       { files: [{url: 'b.js', content: 'b'.repeat(20), size: 20, type: 'external'}], dependencies: {nodes: [], edges: []}, totalSize: 20, collectTime: 1 },
       { mode: 'x' },
     );
-    assert.strictEqual((cache as any).memoryCache.size, 1);
+    assert.strictEqual(mutableCache.memoryCache.size, 1);
 
-    const key = (cache as any).generateKey('https://example.com/mem', undefined);
-    (cache as any).memoryCache.set(key, {
+    const key = mutableCache.generateKey('https://example.com/mem', undefined);
+    mutableCache.memoryCache.set(key, {
       files: [{url: 'm.js', content: 'm', size: 1, type: 'external'}],
       totalSize: 1,
       collectTime: 1,
@@ -64,7 +78,7 @@ describe('Code cache and compressor', () => {
     const fromMemory = await cache.get('https://example.com/mem');
     assert.strictEqual(fromMemory?.files[0]?.url, 'm.js');
 
-    (cache as any).memoryCache.set(key, {
+    mutableCache.memoryCache.set(key, {
       files: [{url: 'm2.js', content: 'm2', size: 2, type: 'external'}],
       totalSize: 2,
       collectTime: 1,

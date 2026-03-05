@@ -101,6 +101,11 @@ interface DebuggerContextHarness {
   evaluateOnCallFrame(callFrameId: string, expression: string): Promise<{result?: {value?: unknown}; exceptionDetails?: unknown}>;
   getScopeVariables(objectId: string, maxDepth?: number): Promise<Array<{name: string; value: unknown}>>;
   getClient(): {send(method: string, params?: unknown): Promise<unknown>} | null;
+  getLastAutoRecoveryEvent?(): {
+    breakpointId: string;
+    hitCount: number;
+    timestamp: number;
+  } | null;
 }
 
 interface ToolContextHarness {
@@ -246,6 +251,7 @@ describe('debugger tools extended', () => {
     await getRequestInitiator.handler({ params: { requestId: 1 } }, response as unknown as Parameters<typeof getRequestInitiator.handler>[1], context as unknown as Parameters<typeof getRequestInitiator.handler>[2]);
 
     assert.ok(response.lines.some((x) => x.includes('Breakpoint set successfully')));
+    assert.ok(response.lines.some((x) => x.includes('If execution appears stuck')));
     assert.ok(response.lines.some((x) => x.includes('Active breakpoints')));
     assert.ok(response.lines.some((x) => x.includes('Call Stack')));
     assert.ok(response.lines.some((x) => x.includes('URL: https://a.js [SourceMap: https://a.js.map]')));
@@ -272,6 +278,7 @@ describe('debugger tools extended', () => {
     context.debuggerContext.isPaused = () => true;
     context.debuggerContext.getScopeVariables = async () => [{ name: 'x', value: 1 }];
     context.debuggerContext.evaluateOnCallFrame = async () => ({ result: { value: { ok: true } } });
+    context.debuggerContext.getLastAutoRecoveryEvent = () => ({ breakpointId: 'bp1', hitCount: 3, timestamp: Date.now() });
 
     await getPausedInfo.handler({ params: { includeScopes: true, maxScopeDepth: 2 } }, response as unknown as Parameters<typeof getPausedInfo.handler>[1], context as unknown as Parameters<typeof getPausedInfo.handler>[2]);
     await evaluateOnCallframe.handler({ params: { expression: 'x', frameIndex: 0 } }, response as unknown as Parameters<typeof evaluateOnCallframe.handler>[1], context as unknown as Parameters<typeof evaluateOnCallframe.handler>[2]);
@@ -284,6 +291,7 @@ describe('debugger tools extended', () => {
     await pause.handler({ params: {} }, response as unknown as Parameters<typeof pause.handler>[1], context as unknown as Parameters<typeof pause.handler>[2]);
 
     assert.ok(response.lines.some((x) => x.includes('Execution Paused')));
+    assert.ok(response.lines.some((x) => x.includes('Auto-recovery detected')));
     assert.ok(response.lines.some((x) => x.includes('SourceMap')));
     assert.ok(response.lines.some((x) => x.includes('Result')));
     assert.ok(response.lines.some((x) => x.includes('Execution resumed') || x.includes('Pause requested')));

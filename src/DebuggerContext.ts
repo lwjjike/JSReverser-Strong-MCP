@@ -113,6 +113,15 @@ export interface EvaluateResult {
   };
 }
 
+export interface AutoRecoveryEvent {
+  breakpointId: string;
+  signature: string;
+  hitCount: number;
+  timestamp: number;
+  actions: string[];
+  error?: string;
+}
+
 /**
  * DebuggerContext manages the Chrome DevTools Protocol Debugger domain.
  * It tracks loaded scripts, manages breakpoints, and provides search functionality.
@@ -124,6 +133,10 @@ export class DebuggerContext {
   #breakpoints = new Map<string, BreakpointInfo>(); // breakpointId -> info
   #enabled = false;
   #pausedState: PausedState = {isPaused: false, callFrames: []};
+  #breakpointHitWindowMs = 2000;
+  #breakpointHitThreshold = 3;
+  #breakpointLoopTracker = new Map<string, {breakpointId: string; count: number; firstHitAt: number; lastHitAt: number}>();
+  #lastAutoRecoveryEvent: AutoRecoveryEvent | null = null;
 
   /**
    * Enable the debugger and start tracking scripts.
@@ -179,6 +192,8 @@ export class DebuggerContext {
     this.#urlToScripts.clear();
     this.#breakpoints.clear();
     this.#pausedState = {isPaused: false, callFrames: []};
+    this.#breakpointLoopTracker.clear();
+    this.#lastAutoRecoveryEvent = null;
     this.#enabled = false;
     this.#client = null;
   }
@@ -274,6 +289,8 @@ export class DebuggerContext {
       data: event.data,
       hitBreakpoints: event.hitBreakpoints,
     };
+
+    void this.#handlePotentialBreakpointLoop(event);
   };
 
   #onResumed = (): void => {
@@ -294,6 +311,16 @@ export class DebuggerContext {
    */
   getPausedState(): PausedState {
     return this.#pausedState;
+  }
+
+  getLastAutoRecoveryEvent(maxAgeMs = 30000): AutoRecoveryEvent | null {
+    if (!this.#lastAutoRecoveryEvent) {
+      return null;
+    }
+    if (Date.now() - this.#lastAutoRecoveryEvent.timestamp > maxAgeMs) {
+      return null;
+    }
+    return this.#lastAutoRecoveryEvent;
   }
 
   /**
@@ -688,5 +715,67 @@ export class DebuggerContext {
    */
   getBreakpointById(breakpointId: string): BreakpointInfo | undefined {
     return this.#breakpoints.get(breakpointId);
+  }
+
+  async #handlePotentialBreakpointLoop(
+    event: Protocol.Debugger.PausedEvent,
+  ): Promise<void> {
+    const breakpointId = event.hitBreakpoints?.[0];
+    if (!breakpointId) {
+      return;
+    }
+
+    const loc = event.callFrames?.[0]?.location;
+    const signature = `${breakpointId}|${loc?.scriptId ?? 'unknown'}:${loc?.lineNumber ?? -1}:${loc?.columnNumber ?? -1}`;
+    const now = Date.now();
+    const tracked = this.#breakpointLoopTracker.get(signature);
+
+    if (!tracked || now - tracked.firstHitAt > this.#breakpointHitWindowMs) {
+      this.#breakpointLoopTracker.set(signature, {
+        breakpointId,
+        count: 1,
+        firstHitAt: now,
+        lastHitAt: now,
+      });
+      return;
+    }
+
+    tracked.count += 1;
+    tracked.lastHitAt = now;
+
+    if (tracked.count < this.#breakpointHitThreshold || !this.#client) {
+      return;
+    }
+
+    const actions: string[] = [];
+    let error: string | undefined;
+
+    try {
+      if (this.#pausedState.isPaused) {
+        await this.#client.send('Debugger.resume');
+        actions.push('resume');
+      }
+    } catch (e) {
+      error = `resume failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
+
+    try {
+      await this.removeBreakpoint(breakpointId);
+      actions.push('remove_breakpoint');
+    } catch (e) {
+      const detail = `removeBreakpoint failed: ${e instanceof Error ? e.message : String(e)}`;
+      error = error ? `${error}; ${detail}` : detail;
+    }
+
+    this.#lastAutoRecoveryEvent = {
+      breakpointId,
+      signature,
+      hitCount: tracked.count,
+      timestamp: Date.now(),
+      actions,
+      error,
+    };
+
+    this.#breakpointLoopTracker.delete(signature);
   }
 }

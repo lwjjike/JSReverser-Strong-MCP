@@ -106,6 +106,66 @@ function buildRequestBindings(records: NormalizedHookRecord[]): Array<Record<str
     }));
 }
 
+function toHookRecordArray(data: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(data)) {
+    return [];
+  }
+  return data.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object');
+}
+
+async function syncHookRecordsFromPage(runtime: ReturnType<typeof getJSHookRuntime>, hookId?: string): Promise<void> {
+  type EvaluatingPage = {
+    evaluate: (fn: (id?: string) => unknown, id?: string) => Promise<unknown>;
+  };
+
+  let page: EvaluatingPage | null = null;
+  try {
+    page = await runtime.collector.getActivePage() as unknown as EvaluatingPage;
+  } catch {
+    return;
+  }
+
+  if (!page || typeof page.evaluate !== 'function') {
+    return;
+  }
+
+  const storeSnapshot = await page.evaluate((id?: string) => {
+    const rawStore = (window as typeof window & {__hookStore?: unknown}).__hookStore;
+    const store = rawStore && typeof rawStore === 'object'
+      ? rawStore as Record<string, unknown>
+      : {};
+
+    const normalize = (value: unknown) => Array.isArray(value) ? value : [];
+
+    if (typeof id === 'string' && id.length > 0) {
+      return {[id]: normalize(store[id])};
+    }
+
+    const all: Record<string, unknown[]> = {};
+    for (const [key, value] of Object.entries(store)) {
+      if (Array.isArray(value)) {
+        all[key] = value;
+      }
+    }
+    return all;
+  }, hookId);
+
+  if (!storeSnapshot || typeof storeSnapshot !== 'object') {
+    return;
+  }
+
+  for (const [id, records] of Object.entries(storeSnapshot as Record<string, unknown>)) {
+    runtime.hookManager.clearRecords(id);
+    for (const record of toHookRecordArray(records)) {
+      runtime.hookManager.addRecord(id, {
+        hookId: id,
+        timestamp: typeof record.timestamp === 'number' ? record.timestamp : Date.now(),
+        ...record,
+      });
+    }
+  }
+}
+
 export const createHook = defineTool({
   name: 'create_hook',
   description: 'RECOMMENDED: Create hook script for function/fetch/xhr/property/cookie/websocket/eval/timer. Hooks run without pausing page execution and are the preferred approach over breakpoints for monitoring and interception.',
@@ -152,6 +212,7 @@ export const getHookData = defineTool({
   },
   handler: async (request, response) => {
     const runtime = getJSHookRuntime();
+    await syncHookRecordsFromPage(runtime, request.params.hookId);
     const view = request.params.view ?? 'raw';
     const maxRecords = request.params.maxRecords ?? 100;
     let data: unknown;

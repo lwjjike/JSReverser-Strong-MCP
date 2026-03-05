@@ -342,9 +342,11 @@ export class PageController {
     const page = await this.collector.getActivePage();
 
     await page.evaluateOnNewDocument((script) => {
-      const scriptElement = document.createElement('script');
-      scriptElement.textContent = script;
-      (document.head ?? document.documentElement).appendChild(scriptElement);
+      // Run script directly in the new document context.
+      // This avoids relying on DOM readiness (head/body may not exist yet)
+      // and is more reliable than appending an inline <script> element.
+      // eslint-disable-next-line no-new-func
+      new Function(script)();
     }, scriptContent);
 
     logger.info('Preload script registered for future documents');

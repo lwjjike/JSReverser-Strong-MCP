@@ -20,6 +20,9 @@ import {ToolCategory} from './categories.js';
 import {getJSHookRuntime} from './runtime.js';
 import {defineTool} from './ToolDefinition.js';
 
+const BREAKPOINT_STALL_HINT =
+  'If execution appears stuck: run resume first. If it keeps pausing at the same location, remove_breakpoint and switch to trace_function(pause=false) or hook_function.';
+
 function formatUrlWithSourceMap(url: string, sourceMapURL?: string): string {
   return sourceMapURL ? `${url} [SourceMap: ${sourceMapURL}]` : url;
 }
@@ -694,6 +697,7 @@ export const setBreakpoint = defineTool({
           `- Resolved to ${breakpointInfo.locations.length} location(s)`,
         );
       }
+      response.appendResponseLine(`- Tip: ${BREAKPOINT_STALL_HINT}`);
     } catch (error) {
       response.appendResponseLine(
         `Error setting breakpoint: ${error instanceof Error ? error.message : String(error)}`,
@@ -970,6 +974,28 @@ export const getPausedInfo = defineTool({
       response.appendResponseLine(
         `Hit breakpoints: ${pausedState.hitBreakpoints.join(', ')}`,
       );
+    }
+
+    const autoRecovery = (
+      debugger_ as {
+        getLastAutoRecoveryEvent?: (maxAgeMs?: number) => {
+          breakpointId: string;
+          hitCount: number;
+          actions?: string[];
+          error?: string;
+        } | null;
+      }
+    ).getLastAutoRecoveryEvent?.(60000);
+    if (autoRecovery) {
+      response.appendResponseLine(
+        `Auto-recovery detected: breakpoint ${autoRecovery.breakpointId} hit ${autoRecovery.hitCount} times in a short window.`,
+      );
+      response.appendResponseLine(
+        `Suggestion: move breakpoint to a lower-frequency path or use hook_function/trace_function(pause=false).`,
+      );
+      if (autoRecovery.error) {
+        response.appendResponseLine(`Recovery warning: ${autoRecovery.error}`);
+      }
     }
 
     response.appendResponseLine('\n📍 Call Stack:');
@@ -1471,6 +1497,7 @@ export const setBreakpointOnText = defineTool({
       if (condition) {
         response.appendResponseLine(`- Condition: ${condition}`);
       }
+      response.appendResponseLine(`- Tip: ${BREAKPOINT_STALL_HINT}`);
 
       // Show context
       const contextStart = Math.max(0, columnNumber - 50);

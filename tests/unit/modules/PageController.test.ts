@@ -79,6 +79,12 @@ describe('PageController', () => {
 
   it('covers screenshot, metrics, storage, cookies and device helpers', async () => {
     const page = makePage();
+    let preloadCallback: ((script: string) => void) | undefined;
+    let preloadScriptArg: string | undefined;
+    page.evaluateOnNewDocument = async (callback: (script: string) => void, script: string) => {
+      preloadCallback = callback;
+      preloadScriptArg = script;
+    };
     let deleteCookieArgsLen = 0;
     page.deleteCookie = async (...args: unknown[]) => {
       deleteCookieArgsLen = args.length;
@@ -116,7 +122,12 @@ describe('PageController', () => {
     assert.strictEqual(metrics.total, 6);
 
     await controller.injectScript('window.__x=1');
-    await controller.injectScriptOnNewDocument('window.__preload=1');
+    await controller.injectScriptOnNewDocument('globalThis.__preload=1');
+    assert.ok(preloadCallback);
+    assert.strictEqual(preloadScriptArg, 'globalThis.__preload=1');
+    preloadCallback?.(preloadScriptArg as string);
+    assert.strictEqual((globalThis as unknown as {__preload?: number}).__preload, 1);
+    delete (globalThis as unknown as {__preload?: number}).__preload;
     await controller.setCookies([{ name: 'sid', value: '1' }]);
     const cookies = await controller.getCookies();
     assert.strictEqual(cookies.length, 1);

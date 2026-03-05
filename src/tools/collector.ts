@@ -23,6 +23,13 @@ export const collectCode = defineTool({
   handler: async (request, response) => {
     const runtime = getJSHookRuntime();
     const returnMode = request.params.returnMode ?? 'full';
+    const shouldCollect =
+      returnMode !== 'summary' || runtime.collector.getCollectedFilesSummary().length === 0;
+
+    if (shouldCollect) {
+      await runtime.collector.collect(request.params);
+    }
+
     let result: unknown;
 
     if (returnMode === 'summary') {

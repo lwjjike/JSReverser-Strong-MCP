@@ -21,11 +21,15 @@ describe('reverse workflow docs', () => {
     const reverseIndex = await readRepoFile('docs/reverse-task-index.md');
     const artifactsDoc = await readRepoFile('docs/reverse-artifacts.md');
     const codexDoc = await readRepoFile('docs/codex-reverse-workflow.md');
+    const envPatchingDoc = await readRepoFile('docs/env-patching-guide.md');
     const updatePromptTemplate = await readRepoFile('docs/reverse-update-prompt-template.md');
     const reverseReportTemplate = await readRepoFile('docs/reverse-report-template.md');
     const algorithmUpgradeTemplate = await readRepoFile('docs/algorithm-upgrade-template.md');
     const toolReference = await readRepoFile('docs/tool-reference.md');
     const outputContract = await readRepoFile('skills/mcp-js-reverse-playbook/references/output-contract.md');
+    const envTemplate = await readRepoFile('artifacts/tasks/_TEMPLATE/env/env.js');
+    const polyfillsTemplate = await readRepoFile('artifacts/tasks/_TEMPLATE/env/polyfills.js');
+    const entryTemplate = await readRepoFile('artifacts/tasks/_TEMPLATE/env/entry.js');
 
     assert.ok(readme.includes('task artifact'));
     assert.ok(readme.includes('local rebuild'));
@@ -50,5 +54,16 @@ describe('reverse workflow docs', () => {
     assert.ok(toolReference.includes('targetFunctionNames'));
     assert.ok(outputContract.includes('targetContext'));
     assert.ok(outputContract.includes('targetActionDescription'));
+    assert.ok(envPatchingDoc.includes('MCP 页面取证'));
+    assert.ok(envPatchingDoc.includes('capture.json'));
+    assert.ok(envPatchingDoc.includes('不要猜环境'));
+    assert.ok(envPatchingDoc.includes('代理诊断层'));
+    assert.ok(envTemplate.includes('globalThis.window = globalThis'));
+    assert.ok(envTemplate.includes('globalThis.localStorage ??='));
+    assert.ok(polyfillsTemplate.includes('globalThis.watch = function watch'));
+    assert.ok(polyfillsTemplate.includes('globalThis.makeFunction = function makeFunction'));
+    assert.ok(polyfillsTemplate.includes('[env:get]'));
+    assert.ok(entryTemplate.includes('import "./env.js";'));
+    assert.ok(entryTemplate.includes('import "./polyfills.js";'));
   });
 });

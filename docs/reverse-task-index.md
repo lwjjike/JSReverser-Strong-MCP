@@ -69,6 +69,8 @@
 
 适合在页面里确认请求链路后，导出 `env/entry.js`、`env/env.js`、`env/polyfills.js`、`env/capture.json` 做 local rebuild。
 
+补环境原则请同时参考：`docs/env-patching-guide.md`
+
 ## 6) 评估风险和加密实现
 
 - `detect_crypto`

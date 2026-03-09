@@ -1,5 +1,7 @@
 # JS Reverse MCP
 
+[English README](README.en.md)
+
 一个把前端 JavaScript 逆向流程标准化的 MCP 服务。  
 目标不是只做页面调试，而是把页面观察、运行时采样、本地复现、补环境和证据沉淀串成一套可复用工作流。
 

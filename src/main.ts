@@ -45,7 +45,7 @@ import {getJSHookRuntime} from './tools/runtime.js';
 
 // If moved update release-please config
 // x-release-please-start-version
-const VERSION = '0.10.2';
+const VERSION = '2.0.3';
 // x-release-please-end
 
 export const args = parseArguments(VERSION);

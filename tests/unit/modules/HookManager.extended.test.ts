@@ -89,4 +89,14 @@ describe('HookManager extended', () => {
       /Unknown hook type/,
     );
   });
+
+  it('generates parseable timer and eval hook scripts', () => {
+    const m = new HookManager();
+    const timer = m.create({ type: 'timer', hookId: 'timer-test' });
+    const evalHook = m.create({ type: 'eval', hookId: 'eval-test' });
+
+    assert.doesNotThrow(() => new Function(timer.script));
+    assert.doesNotThrow(() => new Function(evalHook.script));
+    assert.ok(!evalHook.script.includes('function eval('));
+  });
 });

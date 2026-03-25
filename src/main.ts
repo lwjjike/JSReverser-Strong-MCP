@@ -37,6 +37,7 @@ import * as scriptTools from './tools/script.js';
 import * as jshookStealthTools from './tools/stealth.js';
 import type {ToolDefinition} from './tools/ToolDefinition.js';
 import {ToolRegistry} from './tools/ToolRegistry.js';
+import * as wasmTools from './tools/wasm.js';
 import * as websocketTools from './tools/websocket.js';
 import {ErrorCodes, formatError} from './utils/errors.js';
 import {TokenBudgetManager} from './utils/TokenBudgetManager.js';
@@ -228,6 +229,7 @@ const toolSources: Array<{source: string; tools: ToolDefinition[]}> = [
   {source: 'jshookDom', tools: asTools(jshookDomTools)},
   {source: 'jshookPage', tools: asTools(jshookPageTools)},
   {source: 'jshookRebuild', tools: asTools(jshookRebuildTools)},
+  {source: 'wasm', tools: asTools(wasmTools)},
   {source: 'websocket', tools: asTools(websocketTools)},
 ];
 

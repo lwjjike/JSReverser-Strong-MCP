@@ -520,7 +520,188 @@ export interface SessionData {
   deobfuscated?: DeobfuscateResult;
   analysis?: UnderstandCodeResult;
   crypto?: DetectCryptoResult;
+  wasm?: DetectWasmResult;
   hooks?: HookRecord[];
+}
+
+// ==================== Wasm 绫诲瀷 ====================
+
+export interface WasmImport {
+  module: string;
+  name: string;
+  kind: 'function' | 'table' | 'memory' | 'global' | 'tag' | 'unknown';
+  typeIndex?: number;
+  params?: string[];
+  results?: string[];
+  limits?: {
+    min: number;
+    max?: number;
+    shared?: boolean;
+  };
+  valueType?: string;
+  mutable?: boolean;
+}
+
+export interface WasmExport {
+  name: string;
+  kind: 'function' | 'table' | 'memory' | 'global' | 'tag' | 'unknown';
+  index: number;
+  params?: string[];
+  results?: string[];
+  callCount?: number;
+}
+
+export interface WasmModuleSummary {
+  id: string;
+  hash: string;
+  size: number;
+  sourceUrl?: string;
+  contentType?: string;
+  loadMethods: string[];
+  origin: 'network' | 'runtime' | 'hybrid';
+  imports?: WasmImport[];
+  exports?: WasmExport[];
+  memoryCount: number;
+  importCount: number;
+  exportCount: number;
+  styleHints: string[];
+  purposeHints: string[];
+  riskTags: string[];
+  fingerprints: Array<{
+    family: string;
+    confidence: number;
+    reason: string;
+  }>;
+  artifactPath?: string;
+}
+
+export interface WasmRuntimeCaptureResult {
+  id: string;
+  type:
+    | 'instantiate'
+    | 'instantiateStreaming'
+    | 'compile'
+    | 'compileStreaming'
+    | 'module'
+    | 'export_call'
+    | 'memory_buffer_access'
+    | 'memory_view_create'
+    | 'memory_write'
+    | 'memory_read'
+    | 'text_encode'
+    | 'text_decode'
+    | 'network_request';
+  timestamp: number;
+  moduleId?: string;
+  runtimeModuleId?: string;
+  loadMethod?: string;
+  sourceType?: string;
+  importKeys?: string[];
+  exportKeys?: string[];
+  exportName?: string;
+  memoryExportName?: string;
+  viewType?: string;
+  accessKind?: 'read' | 'write' | 'create' | 'buffer';
+  byteOffset?: number;
+  byteLength?: number;
+  method?: string;
+  url?: string;
+  bodySnippet?: string;
+  argsPreview?: string[];
+  resultPreview?: string;
+  stackSummary?: string[];
+  sideEffectHints?: string[];
+  memory?: Array<{
+    minPages: number;
+    maxPages?: number;
+    shared?: boolean;
+    exportedName?: string;
+  }>;
+}
+
+export interface DetectWasmOptions {
+  url: string;
+  timeout?: number;
+  waitAfterLoadMs?: number;
+  includeRuntimeEvents?: boolean;
+  includeImports?: boolean;
+  includeExports?: boolean;
+  maxModules?: number;
+  captureBase64?: boolean;
+  taskId?: string;
+  taskSlug?: string;
+  targetUrl?: string;
+  goal?: string;
+}
+
+export interface DetectWasmResult {
+  modules: WasmModuleSummary[];
+  runtimeEvents: WasmRuntimeCaptureResult[];
+  totalModules: number;
+  totalRuntimeEvents: number;
+  collectedAt: string;
+  artifacts?: {
+    rootDir?: string;
+    moduleIndexPath?: string;
+    runtimeEventsPath?: string;
+    importsExportsPath?: string;
+    boundaryReportPath?: string;
+    binsDir?: string;
+    analysisDir?: string;
+  };
+}
+
+export interface WasmBoundaryChainResult {
+  moduleId: string;
+  runtimeModuleId?: string;
+  exportName: string;
+  score: number;
+  startedAt: number;
+  endedAt: number;
+  writerHints: string[];
+  readerHints: string[];
+  sinkHints: string[];
+  candidateJsCallers: string[];
+  networkTargets: Array<{
+    method?: string;
+    url?: string;
+    bodySnippet?: string;
+  }>;
+  steps: Array<{
+    type: WasmRuntimeCaptureResult['type'];
+    timestamp: number;
+    description: string;
+    exportName?: string;
+    memoryExportName?: string;
+    url?: string;
+    method?: string;
+    stackSummary?: string[];
+  }>;
+}
+
+export interface WasmDecompileResultSummary {
+  moduleId?: string;
+  hash?: string;
+  size: number;
+  wat: string;
+  lineCount: number;
+  functionCount: number;
+  importCount: number;
+  exportCount: number;
+  functionSummaries: Array<{
+    name: string;
+    index?: number;
+    paramCount: number;
+    resultCount: number;
+    instructionCount: number;
+    callCount: number;
+    indirectCallCount: number;
+    memoryLoadCount: number;
+    memoryStoreCount: number;
+    localAccessCount: number;
+    suspiciousTags: string[];
+    preview: string[];
+  }>;
 }
 
 // ==================== 环境补全相关类型 ====================

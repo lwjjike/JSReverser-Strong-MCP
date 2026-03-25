@@ -65,6 +65,7 @@
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "sm-crypto": "^0.4.0",
+    "wabt": "^1.0.39",
     "xbogus": "^1.0.2"
   },
   "devDependencies": {
@@ -83,9 +84,9 @@
     "@types/yargs": "^17.0.33",
     "@typescript-eslint/eslint-plugin": "^8.43.0",
     "@typescript-eslint/parser": "^8.43.0",
+    "c8": "^10.1.3",
     "chrome-devtools-frontend": "1.0.1547571",
     "core-js": "3.47.0",
-    "c8": "^10.1.3",
     "debug": "4.4.3",
     "eslint": "^9.35.0",
     "eslint-import-resolver-typescript": "^4.4.4",

@@ -13,6 +13,10 @@ import {PageController} from '../modules/collector/PageController.js';
 import {CryptoDetector} from '../modules/crypto/CryptoDetector.js';
 import {Deobfuscator} from '../modules/deobfuscator/Deobfuscator.js';
 import {HookManager} from '../modules/hook/HookManager.js';
+import {WasmAnalyzer} from '../modules/wasm/WasmAnalyzer.js';
+import {WasmCollector} from '../modules/wasm/WasmCollector.js';
+import {WasmDecompiler} from '../modules/wasm/WasmDecompiler.js';
+import {WasmRuntimeInspector} from '../modules/wasm/WasmRuntimeInspector.js';
 import {ReverseTaskStore} from '../reverse/ReverseTaskStore.js';
 import {LLMService} from '../services/LLMService.js';
 import type {PuppeteerConfig} from '../types/index.js';
@@ -39,6 +43,10 @@ export interface JSHookRuntime {
   summarizer: AISummarizer;
   deobfuscator: Deobfuscator;
   cryptoDetector: CryptoDetector;
+  wasmCollector: WasmCollector;
+  wasmAnalyzer: WasmAnalyzer;
+  wasmDecompiler: WasmDecompiler;
+  wasmRuntimeInspector: WasmRuntimeInspector;
   reverseTaskStore: ReverseTaskStore;
   bindPageContext: (resolver: () => Page) => void;
   syncPageContext: (page: Page) => void;
@@ -74,6 +82,9 @@ export function getJSHookRuntime(): JSHookRuntime {
   const pageController = new PageController(collector);
   const hookManager = new HookManager();
   const llmService = new LLMService();
+  const wasmAnalyzer = new WasmAnalyzer();
+  const wasmDecompiler = new WasmDecompiler();
+  const wasmRuntimeInspector = new WasmRuntimeInspector();
   const detailedDataManager = DetailedDataManager.getInstance();
   const unifiedCacheManager = UnifiedCacheManager.getInstance();
   const reverseTaskStore = new ReverseTaskStore();
@@ -93,6 +104,10 @@ export function getJSHookRuntime(): JSHookRuntime {
     summarizer: new AISummarizer(llmService),
     deobfuscator: new Deobfuscator(llmService),
     cryptoDetector: new CryptoDetector(llmService),
+    wasmCollector: new WasmCollector(pageController, wasmAnalyzer, wasmRuntimeInspector),
+    wasmAnalyzer,
+    wasmDecompiler,
+    wasmRuntimeInspector,
     reverseTaskStore,
     bindPageContext: (resolver) => {
       collector.setPageResolver(() => resolver());

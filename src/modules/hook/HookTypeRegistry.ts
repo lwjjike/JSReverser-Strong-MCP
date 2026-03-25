@@ -9,6 +9,9 @@
  */
 
 import { HookCodeBuilder, type BuilderConfig } from './HookCodeBuilder.js';
+// xbs
+import { getStringArray, NATIVE_PROTECT_STRING, getToStringProtectCode, LOGGER_INFO_STRING, printString, getDescStr } from './constants.js';
+// xbs end
 
 // ==================== 插件接口 ====================
 
@@ -83,6 +86,9 @@ export class HookTypeRegistry {
     this.register(createEvalPlugin());
     this.register(createObjectMethodPlugin());
     this.register(createCustomPlugin());
+    // xbs
+    this.register(createJSONPlugin());
+    // xbs end
   }
 }
 
@@ -137,6 +143,8 @@ function createFetchPlugin(): HookTypePlugin {
         `// ID: ${hookId}`,
         `(function() {`,
         `  'use strict';`,
+        ...getStringArray(LOGGER_INFO_STRING),
+        ...getStringArray(NATIVE_PROTECT_STRING),
         `  if (!window.${storeKey}) window.${storeKey} = {};`,
         `  if (!window.${storeKey}['${hookId}']) window.${storeKey}['${hookId}'] = [];`,
         `  const __originalFetch = window.fetch;`,
@@ -211,7 +219,10 @@ function createFetchPlugin(): HookTypePlugin {
         lines.push(`      __records.push(hookData);`);
 
         if (config.store.console) {
-          lines.push(`      console.log('[${hookId}] fetch', method, url, hookData);`);
+          // xbs
+          // lines.push(`      console.log('[${hookId}] fetch', method, url, hookData);`);
+          lines.push(printString(`'[${hookId}] fetch', method, url, hookData`));
+          // xbs end
         }
 
         lines.push(`      return response;`);
@@ -229,7 +240,12 @@ function createFetchPlugin(): HookTypePlugin {
       }
 
       lines.push(`  };`);
-      lines.push(`  console.log('[${hookId}] ✅ Hooked: fetch');`);
+      // xbs
+      lines.push(getToStringProtectCode(`window.fetch`, `fetch`));
+      lines.push(getDescStr("window.fetch", "length", { value: 1, writable: false, enumerable: false, configurable: true }));
+      lines.push(getDescStr("window.fetch", "name", { value: "fetch", writable: false, enumerable: false, configurable: true }));
+      lines.push(printString(`'[${hookId}] ✅ Hooked: fetch'`));
+      // xbs end
       lines.push(`})();`);
 
       return lines.join('\n');
@@ -260,6 +276,8 @@ function createXHRPlugin(): HookTypePlugin {
         `// ID: ${hookId}`,
         `(function() {`,
         `  'use strict';`,
+        ...getStringArray(LOGGER_INFO_STRING),
+        ...getStringArray(NATIVE_PROTECT_STRING),
         `  if (!window.${storeKey}) window.${storeKey} = {};`,
         `  if (!window.${storeKey}['${hookId}']) window.${storeKey}['${hookId}'] = [];`,
         `  const __origOpen = XMLHttpRequest.prototype.open;`,
@@ -319,7 +337,10 @@ function createXHRPlugin(): HookTypePlugin {
         lines.push(`      if (__records.length >= ${max}) __records.shift();`);
         lines.push(`      __records.push(hookData);`);
         if (config.store.console) {
-          lines.push(`      console.log('[${hookId}] xhr', meta.method, meta.url, hookData);`);
+          // xbs
+          // lines.push(`      console.log('[${hookId}] xhr', meta.method, meta.url, hookData);`);
+          lines.push(printString(`'[${hookId}] xhr', meta.method, meta.url, hookData`));
+          // xbs end
         }
         lines.push(`    });`);
         lines.push(`    __xhr.addEventListener('error', function(e) {`);
@@ -333,7 +354,15 @@ function createXHRPlugin(): HookTypePlugin {
       }
 
       lines.push(`  };`);
-      lines.push(`  console.log('[${hookId}] ✅ Hooked: XMLHttpRequest');`);
+      // xbs
+      lines.push(getToStringProtectCode(`XMLHttpRequest.prototype.send`, `send`));
+      lines.push(getDescStr(`XMLHttpRequest.prototype.send`, "name", { value: "send", writable: false, enumerable: false, configurable: true }));
+      lines.push(getDescStr(`XMLHttpRequest.prototype.send`, "length", { value: 0, writable: false, enumerable: false, configurable: true }));
+      lines.push(getToStringProtectCode(`XMLHttpRequest.prototype.open`, `open`));
+      lines.push(getDescStr(`XMLHttpRequest.prototype.open`, "name", { value: "open", writable: false, enumerable: false, configurable: true }));
+      lines.push(getDescStr(`XMLHttpRequest.prototype.open`, "length", { value: 2, writable: false, enumerable: false, configurable: true }));
+      lines.push(printString(`'[${hookId}] ✅ Hooked: XMLHttpRequest'`));
+      // xbs end
       lines.push(`})();`);
 
       return lines.join('\n');
@@ -364,6 +393,8 @@ function createWebSocketPlugin(): HookTypePlugin {
         `// ID: ${hookId}`,
         `(function() {`,
         `  'use strict';`,
+        ...getStringArray(LOGGER_INFO_STRING),
+        ...getStringArray(NATIVE_PROTECT_STRING),
         `  if (!window.${storeKey}) window.${storeKey} = {};`,
         `  if (!window.${storeKey}['${hookId}']) window.${storeKey}['${hookId}'] = [];`,
         `  const __OrigWS = window.WebSocket;`,
@@ -420,7 +451,12 @@ function createWebSocketPlugin(): HookTypePlugin {
       lines.push(`  window.WebSocket.OPEN = __OrigWS.OPEN;`);
       lines.push(`  window.WebSocket.CLOSING = __OrigWS.CLOSING;`);
       lines.push(`  window.WebSocket.CLOSED = __OrigWS.CLOSED;`);
-      lines.push(`  console.log('[${hookId}] ✅ Hooked: WebSocket');`);
+      // xbs
+      lines.push(getToStringProtectCode("window.WebSocket", "WebSocket"));
+      lines.push(getDescStr("window.WebSocket", "length", { value: 1, writable: false, enumerable: false, configurable: true }));
+      lines.push(getDescStr("window.WebSocket", "name", { value: "WebSocket", writable: false, enumerable: false, configurable: true }));
+      lines.push(printString(`'[${hookId}] ✅ Hooked: WebSocket'`));
+      // xbs end
       lines.push(`})();`);
 
       return lines.join('\n');
@@ -457,6 +493,8 @@ function createPropertyPlugin(): HookTypePlugin {
         `// ID: ${hookId}`,
         `(function() {`,
         `  'use strict';`,
+        ...getStringArray(LOGGER_INFO_STRING),
+        ...getStringArray(NATIVE_PROTECT_STRING),
         `  if (!window.${storeKey}) window.${storeKey} = {};`,
         `  if (!window.${storeKey}['${hookId}']) window.${storeKey}['${hookId}'] = [];`,
         `  const __target = ${obj};`,
@@ -471,7 +509,10 @@ function createPropertyPlugin(): HookTypePlugin {
       ];
 
       if (config.store.console) {
-        lines.push(`    console.log('[${hookId}] prop', data);`);
+        // xbs
+        // lines.push(`    console.log('[${hookId}] prop', data);`);
+        lines.push(printString(`'[${hookId}] prop', data`));
+        // xbs end
       }
 
       lines.push(`  };`);
@@ -529,7 +570,9 @@ function createPropertyPlugin(): HookTypePlugin {
 
       lines.push(`    },`);
       lines.push(`  });`);
-      lines.push(`  console.log('[${hookId}] ✅ Hooked: ${obj}.${prop} (property)');`);
+      // xbs
+      lines.push(printString(`'[${hookId}] ✅ Hooked: ${obj}.${prop} (property)'`));
+      // xbs end
       lines.push(`})();`);
 
       return lines.join('\n');
@@ -618,7 +661,12 @@ function createEventPlugin(): HookTypePlugin {
       }
 
       lines.push(`  };`);
-      lines.push(`  console.log('[${hookId}] ✅ Hooked: addEventListener${eventName ? ' (' + eventName + ')' : ''}');`);
+      // xbs
+      lines.push(getToStringProtectCode("EventTarget.prototype.addEventListener", "addEventListener"));
+      lines.push(getDescStr("EventTarget.prototype.addEventListener", "length", { value: 2, writable: false, enumerable: false, configurable: true }));
+      lines.push(getDescStr("EventTarget.prototype.addEventListener", "name", { value: "addEventListener", writable: false, enumerable: false, configurable: true }));
+      lines.push(printString(`'[${hookId}] ✅ Hooked: addEventListener${eventName ? ' (' + eventName + ')' : ''}'`));
+      // xbs end
       lines.push(`})();`);
 
       return lines.join('\n');
@@ -649,6 +697,10 @@ function createTimerPlugin(): HookTypePlugin {
         `// ID: ${hookId}`,
         `(function() {`,
         `  'use strict';`,
+        // xbs
+        ...getStringArray(LOGGER_INFO_STRING),
+        ...getStringArray(NATIVE_PROTECT_STRING),
+        // xbs end
         `  if (!window.${storeKey}) window.${storeKey} = {};`,
         `  if (!window.${storeKey}['${hookId}']) window.${storeKey}['${hookId}'] = [];`,
         `  let __callCount = 0;`,
@@ -674,7 +726,9 @@ function createTimerPlugin(): HookTypePlugin {
       lines.push(`      __records.push(hookData);`);
 
       if (config.store.console) {
-        lines.push(`      console.log('[${hookId}]', name, delay + 'ms', hookData);`);
+        // xbs
+        lines.push(printString(`'[${hookId}]', name, delay + 'ms', hookData`));
+        // xbs end
       }
 
       if (config.action === 'block') {
@@ -689,12 +743,25 @@ function createTimerPlugin(): HookTypePlugin {
 
       if (timerType === 'setTimeout' || timerType === 'both') {
         lines.push(`  __hookTimer('setTimeout');`);
+        // xbs
+        lines.push(getToStringProtectCode("window.setTimeout", "setTimeout"));
+        lines.push(getDescStr("window.setTimeout", "length", { value: 1, writable: false, enumerable: false, configurable: true }));
+        lines.push(getDescStr("window.setTimeout", "name", { value: "setTimeout", writable: false, enumerable: false, configurable: true }));
+        // xbs end
       }
       if (timerType === 'setInterval' || timerType === 'both') {
         lines.push(`  __hookTimer('setInterval');`);
+        // xbs
+        lines.push(getToStringProtectCode("window.setInterval", "setInterval"));
+        lines.push(getDescStr("window.setInterval", "length", { value: 1, writable: false, enumerable: false, configurable: true }));
+        lines.push(getDescStr("window.setInterval", "name", { value: "setInterval", writable: false, enumerable: false, configurable: true }));
+        // xbs end
       }
 
-      lines.push(`  console.log('[${hookId}] ✅ Hooked: timers (${timerType})');`);
+      // xbs
+      // lines.push(`  console.log('[${hookId}] ✅ Hooked: timers (${timerType})');`);
+      lines.push(printString(`'[${hookId}] ✅ Hooked: timers (${timerType})'`));
+      // xbs end
       lines.push(`})();`);
 
       return lines.join('\n');
@@ -724,6 +791,10 @@ function createLocalStoragePlugin(): HookTypePlugin {
         `// ID: ${hookId}`,
         `(function() {`,
         `  'use strict';`,
+        // xbs
+        ...getStringArray(LOGGER_INFO_STRING),
+        ...getStringArray(NATIVE_PROTECT_STRING),
+        // xbs end
         `  if (!window.${storeKey}) window.${storeKey} = {};`,
         `  if (!window.${storeKey}['${hookId}']) window.${storeKey}['${hookId}'] = [];`,
         `  let __callCount = 0;`,
@@ -765,7 +836,9 @@ function createLocalStoragePlugin(): HookTypePlugin {
       lines.push(`      __records.push(hookData);`);
 
       if (config.store.console) {
-        lines.push(`      console.log('[${hookId}] localStorage.' + method, key, hookData);`);
+        // xbs
+        lines.push(printString(`'[${hookId}] localStorage.' + method, key, hookData`));
+        // xbs end
       }
 
       if (config.action === 'block') {
@@ -778,8 +851,28 @@ function createLocalStoragePlugin(): HookTypePlugin {
       }
 
       lines.push(`    };`);
+      // xbs
+      lines.push("if (method === 'getItem') {");
+      lines.push(getToStringProtectCode("Storage.prototype.getItem", "getItem"));
+      lines.push(getDescStr("Storage.prototype.getItem", "length", { value: 1, writable: false, enumerable: false, configurable: true }));
+      lines.push(getDescStr("Storage.prototype.getItem", "name", { value: "getItem", writable: false, enumerable: false, configurable: true }));
+      lines.push("}");
+      lines.push("if (method === 'setItem') {");
+      lines.push(getToStringProtectCode("Storage.prototype.setItem", "setItem"));
+      lines.push(getDescStr("Storage.prototype.setItem", "length", { value: 2, writable: false, enumerable: false, configurable: true }));
+      lines.push(getDescStr("Storage.prototype.setItem", "name", { value: "setItem", writable: false, enumerable: false, configurable: true }));
+      lines.push("}");
+      lines.push("if (method === 'removeItem') {");
+      lines.push(getToStringProtectCode("Storage.prototype.removeItem", "removeItem"));
+      lines.push(getDescStr("Storage.prototype.removeItem", "length", { value: 1, writable: false, enumerable: false, configurable: true }));
+      lines.push(getDescStr("Storage.prototype.removeItem", "name", { value: "removeItem", writable: false, enumerable: false, configurable: true }));
+      lines.push("}");
+      // xbs end
       lines.push(`  });`);
-      lines.push(`  console.log('[${hookId}] ✅ Hooked: localStorage');`);
+      // xbs
+      // lines.push(`  console.log('[${hookId}] ✅ Hooked: localStorage');`);
+      lines.push(printString(`'[${hookId}] ✅ Hooked: localStorage'`));
+      // xbs end
       lines.push(`})();`);
 
       return lines.join('\n');
@@ -808,14 +901,19 @@ function createCookiePlugin(): HookTypePlugin {
         `// ID: ${hookId}`,
         `(function() {`,
         `  'use strict';`,
+        // xbs
+        ...getStringArray(LOGGER_INFO_STRING),
+        ...getStringArray(NATIVE_PROTECT_STRING),
+        // xbs end
         `  if (!window.${storeKey}) window.${storeKey} = {};`,
         `  if (!window.${storeKey}['${hookId}']) window.${storeKey}['${hookId}'] = [];`,
         `  const __desc = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie') || Object.getOwnPropertyDescriptor(HTMLDocument.prototype, 'cookie');`,
         `  if (!__desc) { console.warn('[${hookId}] Cannot hook document.cookie'); return; }`,
         `  let __callCount = 0;`,
         ``,
-        `  Object.defineProperty(document, 'cookie', {`,
+        `  Object.defineProperty(Document.prototype, 'cookie', {`,
         `    configurable: true,`,
+        `    enumerable: true,`,
         `    get() {`,
         `      __callCount++;`,
         `      const val = __desc.get.call(this);`,
@@ -829,7 +927,7 @@ function createCookiePlugin(): HookTypePlugin {
         `      const __records = window.${storeKey}['${hookId}'];`,
         `      if (__records.length >= ${max}) __records.shift();`,
         `      __records.push(hookData);`,
-        config.store.console ? `      console.log('[${hookId}] cookie get', hookData);` : '',
+        config.store.console ? printString(`'[${hookId}] cookie get', hookData`) : '',
         `      return val;`,
         `    },`,
         `    set(val) {`,
@@ -848,10 +946,19 @@ function createCookiePlugin(): HookTypePlugin {
         `      const __records = window.${storeKey}['${hookId}'];`,
         `      if (__records.length >= ${max}) __records.shift();`,
         `      __records.push(hookData);`,
-        config.store.console ? `      console.log('[${hookId}] cookie set', hookData);` : '',
+        config.store.console ? printString(`'[${hookId}] cookie set', hookData`) : '',
         `    },`,
         `  });`,
-        `  console.log('[${hookId}] ✅ Hooked: document.cookie');`,
+        // xbs
+        getToStringProtectCode(`Object.getOwnPropertyDescriptor(Document.prototype, "cookie").get`, "get cookie"),
+        getToStringProtectCode(`Object.getOwnPropertyDescriptor(Document.prototype, "cookie").set`, "set cookie"),
+        getDescStr(`Object.getOwnPropertyDescriptor(Document.prototype, "cookie").get`, "name", { value: "get cookie", writable: false, enumerable: false, configurable: true }),
+        getDescStr(`Object.getOwnPropertyDescriptor(Document.prototype, "cookie").get`, "length", { value: 0, writable: false, enumerable: false, configurable: true }),
+        getDescStr(`Object.getOwnPropertyDescriptor(Document.prototype, "cookie").set`, "name", { value: "set cookie", writable: false, enumerable: false, configurable: true }),
+        getDescStr(`Object.getOwnPropertyDescriptor(Document.prototype, "cookie").set`, "length", { value: 1, writable: false, enumerable: false, configurable: true }),
+        // `  console.log('[${hookId}] ✅ Hooked: document.cookie');`,
+        printString(`'[${hookId}] ✅ Hooked: document.cookie'`),
+        // xbs end
         `})();`,
       ].filter(Boolean).join('\n');
     },
@@ -879,13 +986,18 @@ function createEvalPlugin(): HookTypePlugin {
         `// ID: ${hookId}`,
         `(function() {`,
         `  'use strict';`,
+        // xbs
+        ...getStringArray(LOGGER_INFO_STRING),
+        ...getStringArray(NATIVE_PROTECT_STRING),
+        // xbs end
         `  if (!window.${storeKey}) window.${storeKey} = {};`,
         `  if (!window.${storeKey}['${hookId}']) window.${storeKey}['${hookId}'] = [];`,
         `  const __origEval = window.eval;`,
         `  const __origFunction = window.Function;`,
         `  let __callCount = 0;`,
         ``,
-        `  window.eval = function(code) {`,
+        `  const patchedEval = { `,
+        `   eval(code) {`,
         `    __callCount++;`,
         `    const hookData = {`,
         `      hookId: '${hookId}', target: 'eval', timestamp: Date.now(),`,
@@ -902,7 +1014,10 @@ function createEvalPlugin(): HookTypePlugin {
       lines.push(`    };`);
 
       if (config.store.console) {
-        lines.push(`    console.log('[${hookId}] eval', hookData);`);
+        // xbs
+        // lines.push(`    console.log('[${hookId}] eval', hookData);`);
+        lines.push(printString(`'[${hookId}] eval', hookData`))
+        // xbs end
       }
 
       lines.push(`    const __records = window.${storeKey}['${hookId}'];`);
@@ -915,10 +1030,16 @@ function createEvalPlugin(): HookTypePlugin {
       } else {
         lines.push(`    return __origEval.call(this, code);`);
       }
-      lines.push(`  };`);
+      lines.push(`  }\n};`);
+      // xbs
+      lines.push(`window.eval = patchedEval.eval;`);
+      lines.push(getToStringProtectCode(`window.eval`, "eval"));
+      lines.push(getDescStr(`window.eval`, "name", { value: "eval", writable: false, enumerable: false, configurable: true }));
+      lines.push(getDescStr(`window.eval`, "length", { value: 1, writable: false, enumerable: false, configurable: true }));
+      // xbs end
 
       // Function constructor
-      lines.push(`  window.Function = function(...funcArgs) {`);
+      lines.push(`  window.Function = function (...funcArgs) {`);
       lines.push(`    __callCount++;`);
       lines.push(`    const hookData = {`);
       lines.push(`      hookId: '${hookId}', target: 'Function', timestamp: Date.now(),`);
@@ -927,7 +1048,10 @@ function createEvalPlugin(): HookTypePlugin {
       lines.push(`    };`);
 
       if (config.store.console) {
-        lines.push(`    console.log('[${hookId}] Function()', hookData);`);
+        // xbs
+        // lines.push(`    console.log('[${hookId}] Function()', hookData);`);
+        lines.push(printString(`'[${hookId}] Function()', hookData`));
+        // xbs end
       }
 
       lines.push(`    const __records = window.${storeKey}['${hookId}'];`);
@@ -937,7 +1061,13 @@ function createEvalPlugin(): HookTypePlugin {
       lines.push(`  };`);
       lines.push(`  window.Function.prototype = __origFunction.prototype;`);
 
-      lines.push(`  console.log('[${hookId}] ✅ Hooked: eval & Function');`);
+      // xbs
+      lines.push(getToStringProtectCode("window.Function", "Function"));
+      lines.push(getDescStr(`window.Function`, "name", { value: "Function", writable: false, enumerable: false, configurable: true }));
+      lines.push(getDescStr(`window.Function`, "length", { value: 1, writable: false, enumerable: false, configurable: true }));
+      // lines.push(`  console.log('[${hookId}] ✅ Hooked: eval & Function');`);
+      lines.push(printString(`'[${hookId}] ✅ Hooked: eval & Function'`))
+      // xbs end
       lines.push(`})();`);
 
       return lines.join('\n');
@@ -977,6 +1107,167 @@ function createCustomPlugin(): HookTypePlugin {
       const script = params.script as string;
       if (!script) throw new Error('[custom] params.script is required');
       return script;
+    },
+  };
+}
+
+/**
+ * json 类型 - Hook JSON
+ * 
+ *  */ 
+function createJSONPlugin(): HookTypePlugin {
+  return {
+    name: 'json',
+    description: 'Hook JSON stringify and parse',
+    apply(builder) {
+      return builder;
+    },
+    customBuild(builder, params) {
+      const config = builder.getConfig();
+      const hookId = config.hookId;
+      const storeKey = config.store.globalKey || '__hookStore';
+      const max = config.store.maxRecords || 500;
+      const lines: string[] = [
+        `// Hook: JSON`,
+        `// ID: ${hookId}`,
+        `(function() {`,
+        `  'use strict';`,
+        ...getStringArray(LOGGER_INFO_STRING),
+        ...getStringArray(NATIVE_PROTECT_STRING),
+        `  if (!window.${storeKey}) window.${storeKey} = {};`,
+        `  if (!window.${storeKey}['${hookId}']) window.${storeKey}['${hookId}'] = [];`,
+        `  const __origStringify = JSON.stringify;`,
+        `  const __origParse = JSON.parse;`,
+        `  let __callCount = 0;`,
+        ``,
+        `  function __getType(value) {`,
+        `    if (value === null) return 'null';`,
+        `    if (Array.isArray(value)) return 'array';`,
+        `    return typeof value;`,
+        `  }`,
+        ``,
+        `  function __preview(value, maxLength) {`,
+        `    const limit = maxLength || 200;`,
+        `    try {`,
+        `      if (typeof value === 'string') return value.slice(0, limit);`,
+        `      if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value).slice(0, limit);`,
+        `      if (typeof value === 'undefined') return 'undefined';`,
+        `      if (value === null) return 'null';`,
+        `      if (typeof value === 'function') return value.toString().slice(0, limit);`,
+        `      const serialized = __origStringify.call(JSON, value);`,
+        `      return typeof serialized === 'string' ? serialized.slice(0, limit) : String(serialized).slice(0, limit);`,
+        `    } catch (error) {`,
+        `      return Object.prototype.toString.call(value);`,
+        `    }`,
+        `  }`,
+        ``,
+        `  function __pushRecord(hookData) {`,
+        `    const __records = window.${storeKey}['${hookId}'];`,
+        `    if (__records.length >= ${max}) __records.shift();`,
+        `    __records.push(hookData);`,
+        `  }`,
+        ``,
+        `  JSON.stringify = function stringify(data, replacer, space) {`,
+        `    __callCount++;`,
+        `    const hookData = {`,
+        `      hookId: '${hookId}',`,
+        `      target: 'JSON.stringify',`,
+        `      operation: 'stringify',`,
+        `      timestamp: Date.now(),`,
+        `      callCount: __callCount,`,
+        `      valueType: __getType(data),`,
+        `      valuePreview: __preview(data, 200),`,
+        `      hasReplacer: replacer !== undefined,`,
+        `      replacerType: __getType(replacer),`,
+        `      spaceType: __getType(space),`,
+        `      spacePreview: __preview(space, 80),`,
+      ];
+
+      if (config.capture.stack) {
+        const maxFrames = typeof config.capture.stack === 'number' ? config.capture.stack : 10;
+        lines.push(`      stack: new Error().stack.split('\\n').slice(2, ${2 + maxFrames}).join('\\n'),`);
+      }
+
+      lines.push(`    };`);
+
+      if (config.store.console) {
+        lines.push(printString(`'[${hookId}] JSON.stringify', hookData`));
+      }
+
+      if (config.action === 'block') {
+        lines.push(`    hookData.blocked = true;`);
+        lines.push(`    __pushRecord(hookData);`);
+        lines.push(`    return undefined;`);
+      } else {
+        lines.push(`    try {`);
+        lines.push(`      const result = __origStringify.call(this, data, replacer, space);`);
+        lines.push(`      hookData.serializedLength = typeof result === 'string' ? result.length : 0;`);
+        lines.push(`      hookData.resultPreview = typeof result === 'string' ? result.slice(0, 200) : String(result).slice(0, 200);`);
+        lines.push(`      __pushRecord(hookData);`);
+        lines.push(`      return result;`);
+        lines.push(`    } catch (error) {`);
+        lines.push(`      hookData.error = error instanceof Error ? error.message : String(error);`);
+        lines.push(`      __pushRecord(hookData);`);
+        lines.push(`      throw error;`);
+        lines.push(`    }`);
+      }
+
+      lines.push(`  };`);
+      lines.push(``);
+      lines.push(`  JSON.parse = function parse(text, reviver) {`);
+      lines.push(`    __callCount++;`);
+      lines.push(`    const inputText = String(text);`);
+      lines.push(`    const hookData = {`);
+      lines.push(`      hookId: '${hookId}',`);
+      lines.push(`      target: 'JSON.parse',`);
+      lines.push(`      operation: 'parse',`);
+      lines.push(`      timestamp: Date.now(),`);
+      lines.push(`      callCount: __callCount,`);
+      lines.push(`      textPreview: inputText.slice(0, 200),`);
+      lines.push(`      textLength: inputText.length,`);
+      lines.push(`      hasReviver: reviver !== undefined,`);
+      lines.push(`      reviverType: __getType(reviver),`);
+
+      if (config.capture.stack) {
+        const maxFrames = typeof config.capture.stack === 'number' ? config.capture.stack : 10;
+        lines.push(`      stack: new Error().stack.split('\\n').slice(2, ${2 + maxFrames}).join('\\n'),`);
+      }
+
+      lines.push(`    };`);
+
+      if (config.store.console) {
+        lines.push(printString(`'[${hookId}] JSON.parse', hookData`));
+      }
+
+      if (config.action === 'block') {
+        lines.push(`    hookData.blocked = true;`);
+        lines.push(`    __pushRecord(hookData);`);
+        lines.push(`    return undefined;`);
+      } else {
+        lines.push(`    try {`);
+        lines.push(`      const result = __origParse.call(this, text, reviver);`);
+        lines.push(`      hookData.resultType = __getType(result);`);
+        lines.push(`      hookData.resultPreview = __preview(result, 200);`);
+        lines.push(`      __pushRecord(hookData);`);
+        lines.push(`      return result;`);
+        lines.push(`    } catch (error) {`);
+        lines.push(`      hookData.error = error instanceof Error ? error.message : String(error);`);
+        lines.push(`      __pushRecord(hookData);`);
+        lines.push(`      throw error;`);
+        lines.push(`    }`);
+      }
+
+      lines.push(`  };`);
+      lines.push(getToStringProtectCode("JSON.stringify", "stringify"));
+      lines.push(getDescStr("JSON.stringify", "name", { value: "stringify", writable: false, enumerable: false, configurable: true }));
+      lines.push(getDescStr("JSON.stringify", "length", { value: 3, writable: false, enumerable: false, configurable: true }));
+      lines.push(getToStringProtectCode("JSON.parse", "parse"));
+      lines.push(getDescStr("JSON.parse", "name", { value: "parse", writable: false, enumerable: false, configurable: true }));
+      lines.push(getDescStr("JSON.parse", "length", { value: 2, writable: false, enumerable: false, configurable: true }));
+      lines.push(printString(`'[${hookId}] ✅ Hooked: JSON.stringify & JSON.parse'`));
+      lines.push(`})();`);
+
+      return lines.join('\n');
     },
   };
 }

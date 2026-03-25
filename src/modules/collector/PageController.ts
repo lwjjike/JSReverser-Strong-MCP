@@ -327,9 +327,10 @@ export class PageController {
     const page = await this.collector.getActivePage();
 
     await page.evaluate((script) => {
-      const scriptElement = document.createElement('script');
-      scriptElement.textContent = script;
-      document.head.appendChild(scriptElement);
+      // const scriptElement = document.createElement('script');
+      // scriptElement.textContent = script;
+      // document.head.appendChild(scriptElement);
+      new Function(script)();
     }, scriptContent);
 
     logger.info('Script injected into page');

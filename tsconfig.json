@@ -10,6 +10,7 @@
     ],
     "module": "esnext",
     "moduleResolution": "bundler",
+    "sourceMap": true,
     "outDir": "./build",
     "rootDir": ".",
     "strict": true,

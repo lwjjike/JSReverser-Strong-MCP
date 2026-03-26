@@ -6,6 +6,7 @@ import type {
   WasmDecompileResultSummary,
   WasmModuleSummary,
   WasmRuntimeCaptureResult,
+  WasmSignatureDiffResultSummary,
 } from '../types/index.js';
 import {zod} from '../third_party/index.js';
 import type {
@@ -14,6 +15,7 @@ import type {
   WasmDetectionResult,
   WasmModuleRecord,
   WasmRuntimeEvent,
+  WasmSignatureDiffResult,
 } from '../modules/wasm/WasmTypes.js';
 
 import {ToolCategory} from './categories.js';
@@ -61,7 +63,10 @@ function toRuntimeCaptureResult(
     ...event,
     importKeys: event.importKeys ? [...event.importKeys] : undefined,
     exportKeys: event.exportKeys ? [...event.exportKeys] : undefined,
+    requestHeaders: event.requestHeaders ? event.requestHeaders.map((entry) => ({...entry})) : undefined,
+    bodySegments: event.bodySegments ? event.bodySegments.map((entry) => ({...entry})) : undefined,
     argsPreview: event.argsPreview ? [...event.argsPreview] : undefined,
+    resultEntries: event.resultEntries ? event.resultEntries.map((entry) => ({...entry})) : undefined,
     stackSummary: event.stackSummary ? [...event.stackSummary] : undefined,
     sideEffectHints: event.sideEffectHints ? [...event.sideEffectHints] : undefined,
     memory: event.memory ? event.memory.map((entry) => ({...entry})) : undefined,
@@ -75,10 +80,37 @@ function toBoundaryChainResult(chain: WasmBoundaryChain): WasmBoundaryChainResul
     readerHints: [...chain.readerHints],
     sinkHints: [...chain.sinkHints],
     candidateJsCallers: [...chain.candidateJsCallers],
-    networkTargets: chain.networkTargets.map((entry) => ({...entry})),
+    headerCandidates: chain.headerCandidates.map((entry) => ({...entry})),
+    returnValueHints: chain.returnValueHints.map((entry) => ({...entry})),
+    bodyAnalysis: chain.bodyAnalysis
+      ? {
+          ...chain.bodyAnalysis,
+          hints: [...chain.bodyAnalysis.hints],
+          candidateWriters: [...chain.bodyAnalysis.candidateWriters],
+          candidateReaders: [...chain.bodyAnalysis.candidateReaders],
+          segments: chain.bodyAnalysis.segments.map((entry) => ({...entry})),
+        }
+      : undefined,
+    networkTargets: chain.networkTargets.map((entry) => ({
+      ...entry,
+      requestHeaders: entry.requestHeaders ? entry.requestHeaders.map((header) => ({...header})) : undefined,
+    })),
     steps: chain.steps.map((step) => ({
       ...step,
+      requestHeaders: step.requestHeaders ? step.requestHeaders.map((entry) => ({...entry})) : undefined,
+      resultEntries: step.resultEntries ? step.resultEntries.map((entry) => ({...entry})) : undefined,
       stackSummary: step.stackSummary ? [...step.stackSummary] : undefined,
+    })),
+  };
+}
+
+function toSignatureDiffResult(result: WasmSignatureDiffResult): WasmSignatureDiffResultSummary {
+  return {
+    ...result,
+    observations: [...result.observations],
+    changedFields: result.changedFields.map((entry) => ({
+      ...entry,
+      examples: [...entry.examples],
     })),
   };
 }
@@ -212,6 +244,9 @@ export const analyzeWasmModule = defineTool({
     artifactPath: zod.string().optional(),
     includeFunctionSignatures: zod.boolean().optional(),
     includeRawSectionMap: zod.boolean().optional(),
+    includeStringScan: zod.boolean().optional(),
+    maskSensitiveStrings: zod.boolean().optional(),
+    maxStringSlots: zod.number().int().positive().optional(),
     maxSummaryLines: zod.number().int().positive().optional(),
   },
   handler: async (request, response) => {
@@ -228,6 +263,9 @@ export const analyzeWasmModule = defineTool({
     const analysisOptions = {
       includeFunctionSignatures: request.params.includeFunctionSignatures,
       includeRawSectionMap: request.params.includeRawSectionMap,
+      includeStringScan: request.params.includeStringScan,
+      maskSensitiveStrings: request.params.maskSensitiveStrings,
+      maxStringSlots: request.params.maxStringSlots,
       maxSummaryLines: request.params.maxSummaryLines,
     };
 
@@ -332,6 +370,42 @@ export const summarizeWasmBoundary = defineTool({
       }),
       chainCount: chains.length,
       chains,
+    });
+  },
+});
+
+export const analyzeWasmSignatureDiff = defineTool({
+  name: 'analyze_wasm_signature_diff',
+  description: 'Compare captured JS-Wasm boundary chains to highlight which query/body/header inputs vary like signature material.',
+  annotations: {
+    category: ToolCategory.REVERSE_ENGINEERING,
+    readOnlyHint: true,
+  },
+  schema: {
+    moduleId: zod.string(),
+    exportName: zod.string().optional(),
+    maxChains: zod.number().int().positive().optional(),
+  },
+  handler: async (request, response) => {
+    const runtime = getJSHookRuntime();
+    const module = runtime.wasmCollector.getModuleById(request.params.moduleId);
+    if (!module) {
+      throw new Error(`Unknown Wasm module ID: ${request.params.moduleId}`);
+    }
+    const diff = runtime.wasmRuntimeInspector.analyzeSignatureDiff(
+      module,
+      runtime.wasmCollector.getRuntimeEvents(request.params.moduleId),
+      {
+        exportName: request.params.exportName,
+        maxChains: request.params.maxChains,
+      },
+    );
+    appendJson(response, {
+      module: toModuleSummary(module, {
+        includeImports: false,
+        includeExports: true,
+      }),
+      diff: toSignatureDiffResult(diff),
     });
   },
 });

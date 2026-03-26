@@ -1,6 +1,7 @@
 import type {
   WasmAnalysisOptions,
   WasmAnalysisResult,
+  WasmDataSegmentSummary,
   WasmExportEntry,
   WasmExternalKind,
   WasmFunctionFingerprint,
@@ -8,6 +9,8 @@ import type {
   WasmMemoryInfo,
   WasmModuleRecord,
   WasmSectionSummary,
+  WasmStringCategory,
+  WasmStringSlot,
   WasmValueType,
 } from './WasmTypes.js';
 
@@ -35,6 +38,10 @@ interface ParsedModule {
   globalCount: number;
   dataSegmentCount: number;
   codeBodyCount: number;
+  dataSegments: WasmDataSegmentSummary[];
+  stringSlots: WasmStringSlot[];
+  headerCandidates: WasmStringSlot[];
+  keyMaterialCandidates: WasmStringSlot[];
   startFunctionIndex?: number;
 }
 
@@ -180,6 +187,166 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter((value) => value.length > 0))];
 }
 
+function maskSensitiveValue(value: string): string {
+  if (value.length <= 8) {
+    return `${value.slice(0, 2)}***`;
+  }
+  return `${value.slice(0, 4)}***${value.slice(-4)}`;
+}
+
+function looksLikeEncodedMaterial(value: string): boolean {
+  const normalized = value.trim();
+  if (normalized.length < 24) {
+    return false;
+  }
+  if (!/^[A-Za-z0-9+/=]+$/.test(normalized)) {
+    return false;
+  }
+  if (normalized.length % 4 !== 0) {
+    return false;
+  }
+  if (!/[0-9]/.test(normalized) && !/[+/=]/.test(normalized)) {
+    return false;
+  }
+  return true;
+}
+
+function classifyStringValue(value: string): WasmStringCategory {
+  const normalized = value.trim();
+  if (/^(x-|accept|authorization|content-|referer|origin|user-agent|cookie|sec-)/i.test(normalized)) {
+    return 'header-like';
+  }
+  if (/https?:\/\//i.test(normalized) || /^\/[a-z0-9/_-]+/i.test(normalized)) {
+    return 'url-like';
+  }
+  if ((normalized.startsWith('{') && normalized.endsWith('}')) || normalized.includes('":')) {
+    return 'json-like';
+  }
+  if (/^[0-9a-f]{16,}$/i.test(normalized)) {
+    return 'hex-like';
+  }
+  if (looksLikeEncodedMaterial(normalized)) {
+    return 'base64-like';
+  }
+  if (/(secret|private|signature|token|nonce|hmac|aes|sm4|sm3|sha|md5|passwd|key)/i.test(normalized)) {
+    return 'key-material';
+  }
+  return 'plain-text';
+}
+
+function isSensitiveString(value: string, category: WasmStringCategory): boolean {
+  if (category === 'key-material' || category === 'base64-like' || category === 'hex-like') {
+    return true;
+  }
+  return /(secret|private|signature|token|nonce|passwd|key)/i.test(value);
+}
+
+function isLikelyInterestingString(value: string): boolean {
+  if (value.length < 4) {
+    return false;
+  }
+  return /[A-Za-z]/.test(value);
+}
+
+function readInitExpr(reader: ByteReader): {offset?: number} {
+  const opcode = reader.readByte();
+  if (opcode === 0x41) {
+    const offset = reader.readVarUint32();
+    const end = reader.readByte();
+    if (end !== 0x0b) {
+      throw new Error('Unsupported data segment init expression');
+    }
+    return {offset};
+  }
+  if (opcode === 0x23) {
+    reader.readVarUint32();
+    const end = reader.readByte();
+    if (end !== 0x0b) {
+      throw new Error('Unsupported global-based data segment init expression');
+    }
+    return {};
+  }
+  while (reader.remaining > 0) {
+    const value = reader.readByte();
+    if (value === 0x0b) {
+      break;
+    }
+  }
+  return {};
+}
+
+function extractPrintableRuns(
+  bytes: Uint8Array,
+  options: {
+    source: WasmStringSlot['source'];
+    segmentIndex?: number;
+    startOffset: number;
+    maskSensitiveStrings: boolean;
+    maxStringSlots?: number;
+  },
+): WasmStringSlot[] {
+  const slots: WasmStringSlot[] = [];
+  let runStart = -1;
+
+  const flush = (end: number) => {
+    if (runStart < 0) {
+      return;
+    }
+    const start = runStart;
+    const slice = bytes.slice(runStart, end);
+    const value = new TextDecoder().decode(slice).trim();
+    runStart = -1;
+    if (!isLikelyInterestingString(value)) {
+      return;
+    }
+    const category = classifyStringValue(value);
+    const masked = options.maskSensitiveStrings && isSensitiveString(value, category);
+    slots.push({
+      offset: options.startOffset + start,
+      length: slice.byteLength,
+      source: options.source,
+      segmentIndex: options.segmentIndex,
+      category,
+      value,
+      displayValue: masked ? maskSensitiveValue(value) : value,
+      masked,
+    });
+  };
+
+  for (let index = 0; index < bytes.length; index += 1) {
+    const byte = bytes[index]!;
+    const printable = (byte >= 0x20 && byte <= 0x7e) || byte === 0x09;
+    if (printable) {
+      if (runStart < 0) {
+        runStart = index;
+      }
+      continue;
+    }
+    if (runStart >= 0 && index - runStart >= 4) {
+      flush(index);
+      runStart = -1;
+    } else {
+      runStart = -1;
+    }
+  }
+  if (runStart >= 0 && bytes.length - runStart >= 4) {
+    flush(bytes.length);
+  }
+
+  const unique = new Map<string, WasmStringSlot>();
+  for (const slot of slots) {
+    const key = `${slot.offset}:${slot.value}`;
+    if (!unique.has(key)) {
+      unique.set(key, slot);
+    }
+  }
+  const limited = Array.from(unique.values()).sort((a, b) => a.offset - b.offset);
+  if (typeof options.maxStringSlots === 'number' && options.maxStringSlots > 0) {
+    return limited.slice(0, options.maxStringSlots);
+  }
+  return limited;
+}
+
 export class WasmAnalyzer {
   analyzeRecord(
     record: Pick<WasmModuleRecord, 'id' | 'hash' | 'size'>,
@@ -209,6 +376,10 @@ export class WasmAnalyzer {
       typeCount: parsed.typeCount,
       codeBodyCount: parsed.codeBodyCount,
       startFunctionIndex: parsed.startFunctionIndex,
+      dataSegments: parsed.dataSegments,
+      stringSlots: parsed.stringSlots,
+      headerCandidates: parsed.headerCandidates,
+      keyMaterialCandidates: parsed.keyMaterialCandidates,
       styleHints,
       purposeHints,
       riskTags,
@@ -257,6 +428,7 @@ export class WasmAnalyzer {
     const imports: WasmImportEntry[] = [];
     const exports: WasmExportEntry[] = [];
     const memories: WasmMemoryInfo[] = [];
+    const dataSegments: WasmDataSegmentSummary[] = [];
 
     let importFunctionCount = 0;
     let tableCount = 0;
@@ -411,6 +583,39 @@ export class WasmAnalyzer {
         case 11: {
           count = payload.readVarUint32();
           dataSegmentCount = count;
+          for (let index = 0; index < count; index += 1) {
+            const flag = payload.readVarUint32();
+            let mode: WasmDataSegmentSummary['mode'] = 'unknown';
+            let offset: number | undefined;
+            if (flag === 0) {
+              mode = 'active';
+              offset = readInitExpr(payload).offset;
+            } else if (flag === 1) {
+              mode = 'passive';
+            } else if (flag === 2) {
+              mode = 'active-with-memory-index';
+              payload.readVarUint32();
+              offset = readInitExpr(payload).offset;
+            }
+            const size = payload.readVarUint32();
+            const segmentBytes = payload.readBytes(size);
+            const stringSlots = options.includeStringScan === false
+              ? []
+              : extractPrintableRuns(segmentBytes, {
+                  source: 'data-segment',
+                  segmentIndex: index,
+                  startOffset: offset ?? 0,
+                  maskSensitiveStrings: options.maskSensitiveStrings !== false,
+                  maxStringSlots: options.maxStringSlots,
+                });
+            dataSegments.push({
+              index,
+              mode,
+              size,
+              offset,
+              stringSlots,
+            });
+          }
           break;
         }
         case 12: {
@@ -436,6 +641,24 @@ export class WasmAnalyzer {
     }
 
     const exportFunctionCount = exports.filter((entry) => entry.kind === 'function').length;
+    const dataStringSlots = dataSegments.flatMap((segment) => segment.stringSlots);
+    const binaryStringSlots = options.includeStringScan === false
+      ? []
+      : extractPrintableRuns(bytes, {
+          source: 'binary-run',
+          startOffset: 0,
+          maskSensitiveStrings: options.maskSensitiveStrings !== false,
+          maxStringSlots: typeof options.maxStringSlots === 'number' ? options.maxStringSlots * 2 : undefined,
+        }).filter((slot) =>
+          !dataStringSlots.some((existing) => existing.value === slot.value && existing.offset === slot.offset),
+        );
+    const stringSlots = [...dataStringSlots, ...binaryStringSlots]
+      .sort((a, b) => a.offset - b.offset)
+      .slice(0, options.maxStringSlots && options.maxStringSlots > 0 ? options.maxStringSlots : undefined);
+    const headerCandidates = stringSlots.filter((slot) => slot.category === 'header-like' || slot.category === 'url-like');
+    const keyMaterialCandidates = stringSlots.filter((slot) =>
+      slot.category === 'key-material' || slot.category === 'base64-like' || slot.category === 'hex-like',
+    );
     return {
       sections,
       imports,
@@ -449,6 +672,10 @@ export class WasmAnalyzer {
       globalCount,
       dataSegmentCount,
       codeBodyCount,
+      dataSegments,
+      stringSlots,
+      headerCandidates,
+      keyMaterialCandidates,
       startFunctionIndex,
     };
   }
@@ -486,6 +713,8 @@ export class WasmAnalyzer {
     const names = [
       ...parsed.imports.map((item) => `${item.module}.${item.name}`),
       ...parsed.exports.map((item) => item.name),
+      ...parsed.headerCandidates.map((slot) => slot.value),
+      ...parsed.keyMaterialCandidates.map((slot) => slot.value),
     ].map((value) => value.toLowerCase());
 
     const hints: string[] = [];
@@ -503,6 +732,9 @@ export class WasmAnalyzer {
     }
     if (parsed.memories.length > 0 && parsed.exports.filter((item) => item.kind === 'function').length <= 3) {
       hints.push('Few public entry points with explicit memory bridge');
+    }
+    if (parsed.headerCandidates.some((slot) => /(signature|authorization|token)/i.test(slot.value))) {
+      hints.push('Embedded request/header constants detected');
     }
     return uniqueStrings(hints);
   }
@@ -523,6 +755,9 @@ export class WasmAnalyzer {
     }
     if (parsed.tableCount > 0) {
       tags.push('indirect-calls');
+    }
+    if (parsed.keyMaterialCandidates.length > 0) {
+      tags.push('embedded-key-material');
     }
     return uniqueStrings(tags);
   }
@@ -612,6 +847,13 @@ export class WasmAnalyzer {
       `Imports/Exports: ${parsed.imports.length}/${parsed.exports.length}`,
       `Memories/Tables/Globals: ${parsed.memories.length}/${parsed.tableCount}/${parsed.globalCount}`,
       `Data segments: ${parsed.dataSegmentCount}; code bodies: ${parsed.codeBodyCount}`,
+      `String slots: ${parsed.stringSlots.length}; header-like: ${parsed.headerCandidates.length}; key-like: ${parsed.keyMaterialCandidates.length}`,
+      parsed.headerCandidates.length > 0
+        ? `Header/data hints: ${parsed.headerCandidates.slice(0, 4).map((slot) => slot.displayValue).join('; ')}`
+        : 'Header/data hints: none',
+      parsed.keyMaterialCandidates.length > 0
+        ? `Sensitive string hints: ${parsed.keyMaterialCandidates.slice(0, 4).map((slot) => slot.displayValue).join('; ')}`
+        : 'Sensitive string hints: none',
       styleHints.length > 0 ? `Style hints: ${styleHints.join('; ')}` : 'Style hints: none',
       purposeHints.length > 0 ? `Purpose hints: ${purposeHints.join('; ')}` : 'Purpose hints: none',
       riskTags.length > 0 ? `Risk tags: ${riskTags.join(', ')}` : 'Risk tags: none',

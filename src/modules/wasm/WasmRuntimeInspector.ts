@@ -1,9 +1,16 @@
 import type {
+  WasmBodyKind,
+  WasmBodyPathAnalysis,
+  WasmBodySegmentHint,
   WasmBoundaryChain,
   WasmBoundaryStep,
   WasmExportEntry,
+  WasmHeaderEntry,
+  WasmKeyValuePreview,
   WasmModuleRecord,
   WasmRuntimeEvent,
+  WasmSignatureDiffFieldChange,
+  WasmSignatureDiffResult,
 } from './WasmTypes.js';
 
 interface WasmExportUsageSummary {
@@ -14,6 +21,169 @@ interface WasmExportUsageSummary {
   results?: WasmExportEntry['results'];
   suspicion: 'high' | 'medium' | 'low';
   reasons: string[];
+}
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
+}
+
+function normalizeHeaderName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function maskHeaderValue(value: string): string {
+  if (value.length <= 8) {
+    return `${value.slice(0, 2)}***`;
+  }
+  return `${value.slice(0, 4)}***${value.slice(-4)}`;
+}
+
+function isSensitiveHeader(name: string, value: string): boolean {
+  return /(authorization|signature|token|secret|key|cookie)/i.test(name) || value.length >= 24;
+}
+
+function classifyBodyKind(value?: string): WasmBodyKind {
+  const trimmed = (value ?? '').trim();
+  if (trimmed.length === 0) {
+    return 'empty';
+  }
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    return 'json';
+  }
+  if (trimmed.includes('=') && trimmed.includes('&')) {
+    return 'urlencoded';
+  }
+  if (/^[0-9a-f]+$/i.test(trimmed) && trimmed.length >= 16) {
+    return 'hexish';
+  }
+  if (/^[A-Za-z0-9+/=_-]+$/.test(trimmed) && trimmed.length >= 16) {
+    return 'base64ish';
+  }
+  if (trimmed.length > 0) {
+    return 'plain-text';
+  }
+  return 'unknown';
+}
+
+function splitBodySegments(bodySnippet?: string, bodyKind?: WasmBodyKind): WasmBodySegmentHint[] {
+  const body = bodySnippet ?? '';
+  const kind = bodyKind ?? classifyBodyKind(body);
+  const parts: string[] =
+    kind === 'json'
+      ? Object.keys(safeParseJson(body))
+      : kind === 'urlencoded'
+        ? body.split('&').map((entry) => entry.split('=').slice(1).join('=') || entry)
+        : body.includes('.')
+          ? body.split('.')
+          : body.includes(':')
+            ? body.split(':')
+            : body.length > 0
+              ? [body]
+              : [];
+
+  return parts
+    .map((raw, index) => {
+      const value = raw.trim();
+      const classification = classifySegment(value);
+      const likelySignatureMaterial =
+        /(sign|signature|token|nonce|hmac|digest)/i.test(value) ||
+        classification === 'base64ish' ||
+        classification === 'hexish';
+      const masked = likelySignatureMaterial && value.length >= 12;
+      return {
+        index,
+        raw: value,
+        displayValue: masked ? maskHeaderValue(value) : value,
+        classification,
+        likelySignatureMaterial,
+      };
+    })
+    .filter((entry) => entry.raw.length > 0);
+}
+
+function safeParseJson(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Ignore parse errors.
+  }
+  return {};
+}
+
+function classifySegment(value: string): WasmBodySegmentHint['classification'] {
+  if (value.length === 0) {
+    return 'empty';
+  }
+  if (/^\d+$/.test(value)) {
+    return 'numeric';
+  }
+  if (/^[0-9a-f]+$/i.test(value) && value.length >= 16) {
+    return 'hexish';
+  }
+  if (/^[A-Za-z0-9+/=_-]+$/.test(value) && value.length >= 16) {
+    return 'base64ish';
+  }
+  if ((value.startsWith('{') && value.endsWith('}')) || value.includes('":')) {
+    return 'json';
+  }
+  if (value.includes('=') && value.includes('&')) {
+    return 'urlencoded';
+  }
+  return 'plain-text';
+}
+
+function parseUrlDetails(url?: string): {
+  queryOrder?: string;
+  queryValues: Map<string, string[]>;
+} {
+  if (!url) {
+    return {
+      queryValues: new Map(),
+    };
+  }
+  try {
+    const parsed = new URL(url);
+    const queryValues = new Map<string, string[]>();
+    for (const [key, value] of parsed.searchParams.entries()) {
+      const values = queryValues.get(key) ?? [];
+      values.push(value);
+      queryValues.set(key, values);
+    }
+    return {
+      queryOrder: parsed.search ? parsed.search.slice(1) : undefined,
+      queryValues,
+    };
+  } catch {
+    return {
+      queryValues: new Map(),
+    };
+  }
+}
+
+function dedupeHeaders(entries: WasmHeaderEntry[]): WasmHeaderEntry[] {
+  const byName = new Map<string, WasmHeaderEntry>();
+  for (const entry of entries) {
+    const key = normalizeHeaderName(entry.name);
+    if (!byName.has(key)) {
+      byName.set(key, entry);
+    }
+  }
+  return Array.from(byName.values());
+}
+
+function dedupeKeyValue(entries: WasmKeyValuePreview[]): WasmKeyValuePreview[] {
+  const seen = new Set<string>();
+  return entries.filter((entry) => {
+    const key = `${entry.key}:${entry.value}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 export class WasmRuntimeInspector {
@@ -144,6 +314,16 @@ export class WasmRuntimeInspector {
             .filter((line) => !line.includes('WebAssembly.') && !line.includes('at wrappedExports')),
         ),
       ].slice(0, 6);
+      const bodyAnalysis = this.buildBodyAnalysis(writerEvents, readerEvents, sinkEvents);
+      const headerCandidates = dedupeHeaders([
+        ...sinkEvents.flatMap((candidate) => candidate.requestHeaders ?? []),
+        ...((event.resultEntries ?? []).map((entry) => ({
+          name: entry.key,
+          value: entry.value,
+          masked: entry.masked,
+        }))),
+      ]);
+      const returnValueHints = dedupeKeyValue(event.resultEntries ?? []);
 
       const steps: WasmBoundaryStep[] = related
         .map((candidate) => this.toStep(candidate))
@@ -155,7 +335,9 @@ export class WasmRuntimeInspector {
         sinkEvents.length * 3 +
         (writerEvents.some((candidate) => candidate.type === 'text_encode') ? 2 : 0) +
         (readerEvents.some((candidate) => candidate.type === 'text_decode') ? 2 : 0) +
-        (sinkEvents.length > 0 ? 2 : 0);
+        (sinkEvents.length > 0 ? 2 : 0) +
+        (bodyAnalysis.segments.some((segment) => segment.likelySignatureMaterial) ? 2 : 0) +
+        (headerCandidates.length > 0 ? 1 : 0);
 
       chains.push({
         moduleId: module.id,
@@ -168,16 +350,181 @@ export class WasmRuntimeInspector {
         readerHints,
         sinkHints,
         candidateJsCallers,
+        headerCandidates,
+        returnValueHints,
+        bodyAnalysis,
         networkTargets: sinkEvents.map((candidate) => ({
           method: candidate.method,
           url: candidate.url,
           bodySnippet: candidate.bodySnippet,
+          bodyKind: candidate.bodyKind,
+          requestHeaders: candidate.requestHeaders ? [...candidate.requestHeaders] : undefined,
         })),
         steps,
       });
     }
 
     return chains.sort((a, b) => b.score - a.score || b.endedAt - a.endedAt);
+  }
+
+  buildStructuredBoundaryArtifact(modules: WasmModuleRecord[], events: WasmRuntimeEvent[]): {
+    generatedAt: string;
+    modules: Array<{
+      moduleId: string;
+      hash: string;
+      boundary: ReturnType<WasmRuntimeInspector['summarizeBoundary']>;
+      exportUsage: WasmExportUsageSummary[];
+    }>;
+  } {
+    return {
+      generatedAt: new Date().toISOString(),
+      modules: modules.map((module) => ({
+        moduleId: module.id,
+        hash: module.hash,
+        boundary: this.summarizeBoundary(module, events),
+        exportUsage: this.summarizeExports(module, events),
+      })),
+    };
+  }
+
+  analyzeSignatureDiff(
+    module: WasmModuleRecord,
+    events: WasmRuntimeEvent[],
+    options: {
+      exportName?: string;
+      maxChains?: number;
+    } = {},
+  ): WasmSignatureDiffResult {
+    const chains = this.buildBoundaryChains(module, events)
+      .filter((chain) => !options.exportName || chain.exportName === options.exportName)
+      .filter((chain) => chain.networkTargets.length > 0)
+      .slice(0, options.maxChains ?? 12);
+
+    const changedFields: WasmSignatureDiffFieldChange[] = [];
+    const observations: string[] = [];
+
+    const queryOrderValues = new Set<string>();
+    const queryFields = new Map<string, Set<string>>();
+    const headerFields = new Map<string, Set<string>>();
+    const bodyFields = new Map<string, Set<string>>();
+
+    for (const chain of chains) {
+      const target = chain.networkTargets[0];
+      const urlDetails = parseUrlDetails(target?.url);
+      if (urlDetails.queryOrder) {
+        queryOrderValues.add(urlDetails.queryOrder);
+      }
+      for (const [key, values] of urlDetails.queryValues.entries()) {
+        const set = queryFields.get(key) ?? new Set<string>();
+        for (const value of values) {
+          set.add(value);
+        }
+        queryFields.set(key, set);
+      }
+      for (const header of target?.requestHeaders ?? []) {
+        const key = normalizeHeaderName(header.name);
+        const set = headerFields.get(key) ?? new Set<string>();
+        set.add(header.value);
+        headerFields.set(key, set);
+      }
+      const segments = chain.bodyAnalysis?.segments ?? splitBodySegments(target?.bodySnippet, target?.bodyKind);
+      for (const segment of segments) {
+        const key = `segment_${segment.index}`;
+        const set = bodyFields.get(key) ?? new Set<string>();
+        set.add(segment.raw);
+        bodyFields.set(key, set);
+      }
+    }
+
+    if (queryOrderValues.size > 1) {
+      changedFields.push({
+        field: 'query-order',
+        location: 'url-query-order',
+        variationCount: queryOrderValues.size,
+        examples: Array.from(queryOrderValues).slice(0, 4),
+        impact: 'contextual',
+        notes: 'Observed different raw query-string ordering across boundary chains.',
+      });
+      observations.push('URL query parameter order changes across captured boundary chains.');
+    }
+
+    for (const [field, values] of queryFields.entries()) {
+      if (values.size <= 1) {
+        continue;
+      }
+      const impact: WasmSignatureDiffFieldChange['impact'] =
+        /(timestamp|nonce|sign|signature|token)/i.test(field) ? 'signature-candidate' : 'contextual';
+      changedFields.push({
+        field,
+        location: 'url-query',
+        variationCount: values.size,
+        examples: Array.from(values).slice(0, 4),
+        impact,
+        notes: impact === 'signature-candidate'
+          ? 'This query key looks directly related to freshness or signature material.'
+          : 'This query key changed across observed request variants.',
+      });
+    }
+
+    for (const [field, values] of headerFields.entries()) {
+      if (values.size <= 1) {
+        continue;
+      }
+      const impact: WasmSignatureDiffFieldChange['impact'] =
+        /(signature|timestamp|token|authorization)/i.test(field) ? 'signature-candidate' : 'transport-only';
+      changedFields.push({
+        field,
+        location: 'request-header',
+        variationCount: values.size,
+        examples: Array.from(values).slice(0, 4).map((value) =>
+          isSensitiveHeader(field, value) ? maskHeaderValue(value) : value,
+        ),
+        impact,
+        notes: impact === 'signature-candidate'
+          ? 'Header value shifts look consistent with runtime signature generation.'
+          : 'Header value variation looks more transport/context oriented.',
+      });
+    }
+
+    for (const [field, values] of bodyFields.entries()) {
+      if (values.size <= 1) {
+        continue;
+      }
+      const examples = Array.from(values).slice(0, 4);
+      const impact: WasmSignatureDiffFieldChange['impact'] =
+        examples.some((value) => /^[0-9a-f]{16,}$/i.test(value) || /^[A-Za-z0-9+/=_-]{16,}$/.test(value))
+          ? 'signature-candidate'
+          : 'contextual';
+      changedFields.push({
+        field,
+        location: 'body-segment',
+        variationCount: values.size,
+        examples: examples.map((value) => (impact === 'signature-candidate' ? maskHeaderValue(value) : value)),
+        impact,
+        notes: impact === 'signature-candidate'
+          ? 'Body segment value looks like an encoded digest or token.'
+          : 'Body segment varies, but does not look directly like a digest.',
+      });
+    }
+
+    if (changedFields.some((field) => field.impact === 'signature-candidate')) {
+      observations.push('At least one varying header/body/query field looks like candidate signature material.');
+    }
+    if (chains.some((chain) => chain.bodyAnalysis?.segments.some((segment) => segment.likelySignatureMaterial))) {
+      observations.push('Body-path tracing observed encoded-looking segments after Wasm export calls.');
+    }
+    if (observations.length === 0) {
+      observations.push('No strong differential signal was found from the captured Wasm boundary chains.');
+    }
+
+    return {
+      moduleId: module.id,
+      exportName: options.exportName,
+      sampleCount: chains.length,
+      comparedChains: chains.length,
+      observations,
+      changedFields,
+    };
   }
 
   buildBoundaryReport(modules: WasmModuleRecord[], events: WasmRuntimeEvent[]): string {
@@ -194,21 +541,25 @@ export class WasmRuntimeInspector {
       lines.push(`## ${module.id}`);
       lines.push(`- Hash: ${module.hash}`);
       lines.push(`- Load methods: ${module.loadMethods.join(', ')}`);
-      lines.push(
-        `- Import namespaces: ${boundary.importNamespaces.join(', ') || 'none'}`,
-      );
-      lines.push(
-        `- Top exports: ${boundary.topExports.join(', ') || 'none'}`,
-      );
-      lines.push(
-        `- Side effects: ${boundary.sideEffectHints.join(', ') || 'not observed'}`,
-      );
+      lines.push(`- Import namespaces: ${boundary.importNamespaces.join(', ') || 'none'}`);
+      lines.push(`- Top exports: ${boundary.topExports.join(', ') || 'none'}`);
+      lines.push(`- Side effects: ${boundary.sideEffectHints.join(', ') || 'not observed'}`);
       if (boundary.candidateChains.length > 0) {
         lines.push('- Boundary chains:');
         for (const chain of boundary.candidateChains.slice(0, 3)) {
           lines.push(
             `  - ${chain.exportName}: score=${chain.score}, writers=${chain.writerHints.join('; ') || 'none'}, readers=${chain.readerHints.join('; ') || 'none'}, sinks=${chain.sinkHints.join('; ') || 'none'}`,
           );
+          if (chain.bodyAnalysis && chain.bodyAnalysis.segments.length > 0) {
+            lines.push(
+              `    body=${chain.bodyAnalysis.bodyKind}; segments=${chain.bodyAnalysis.segments.map((segment) => segment.displayValue).join(' | ')}`,
+            );
+          }
+          if (chain.headerCandidates.length > 0) {
+            lines.push(
+              `    headers=${chain.headerCandidates.map((entry) => `${entry.name}=${entry.value}`).join('; ')}`,
+            );
+          }
         }
       }
       if (exportUsage.length > 0) {
@@ -228,6 +579,38 @@ export class WasmRuntimeInspector {
       lines.push('');
     }
     return lines.join('\n');
+  }
+
+  private buildBodyAnalysis(
+    writerEvents: WasmRuntimeEvent[],
+    readerEvents: WasmRuntimeEvent[],
+    sinkEvents: WasmRuntimeEvent[],
+  ): WasmBodyPathAnalysis {
+    const sink = sinkEvents[0];
+    const bodyKind = sink?.bodyKind ?? classifyBodyKind(sink?.bodySnippet);
+    const segments =
+      sink?.bodySegments && sink.bodySegments.length > 0
+        ? sink.bodySegments.map((segment) => ({...segment}))
+        : splitBodySegments(sink?.bodySnippet, bodyKind);
+    const hints = uniqueStrings([
+      bodyKind !== 'unknown' ? `body-kind:${bodyKind}` : undefined,
+      writerEvents.some((event) => event.type === 'text_encode') ? 'text-encode-before-network' : undefined,
+      readerEvents.some((event) => event.type === 'text_decode') ? 'text-decode-after-export' : undefined,
+      segments.some((segment) => segment.likelySignatureMaterial) ? 'encoded-body-segment-observed' : undefined,
+    ]);
+    return {
+      bodyKind,
+      segments,
+      hints,
+      candidateWriters: writerEvents
+        .flatMap((event) => event.argsPreview ?? [])
+        .filter((entry) => typeof entry === 'string')
+        .slice(0, 6),
+      candidateReaders: readerEvents
+        .flatMap((event) => event.argsPreview ?? [])
+        .filter((entry) => typeof entry === 'string')
+        .slice(0, 6),
+    };
   }
 
   private describeHint(event: WasmRuntimeEvent): string {
@@ -265,6 +648,10 @@ export class WasmRuntimeInspector {
       memoryExportName: event.memoryExportName,
       url: event.url,
       method: event.method,
+      bodySnippet: event.bodySnippet,
+      bodyKind: event.bodyKind,
+      requestHeaders: event.requestHeaders ? [...event.requestHeaders] : undefined,
+      resultEntries: event.resultEntries ? [...event.resultEntries] : undefined,
       stackSummary: event.stackSummary ? [...event.stackSummary] : undefined,
     };
   }

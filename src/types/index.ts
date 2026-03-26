@@ -551,6 +551,45 @@ export interface WasmExport {
   callCount?: number;
 }
 
+export interface WasmStringSlotSummary {
+  offset: number;
+  length: number;
+  source: 'data-segment' | 'binary-run';
+  segmentIndex?: number;
+  category: 'header-like' | 'url-like' | 'json-like' | 'key-material' | 'base64-like' | 'hex-like' | 'plain-text';
+  value: string;
+  displayValue: string;
+  masked: boolean;
+}
+
+export interface WasmHeaderPreview {
+  name: string;
+  value: string;
+  masked?: boolean;
+}
+
+export interface WasmKeyValuePreviewSummary {
+  key: string;
+  value: string;
+  masked?: boolean;
+}
+
+export interface WasmBodySegmentSummary {
+  index: number;
+  raw: string;
+  displayValue: string;
+  classification: 'empty' | 'json' | 'urlencoded' | 'base64ish' | 'hexish' | 'plain-text' | 'unknown' | 'numeric';
+  likelySignatureMaterial: boolean;
+}
+
+export interface WasmBodyPathSummary {
+  bodyKind: 'empty' | 'json' | 'urlencoded' | 'base64ish' | 'hexish' | 'plain-text' | 'unknown';
+  segments: WasmBodySegmentSummary[];
+  hints: string[];
+  candidateWriters: string[];
+  candidateReaders: string[];
+}
+
 export interface WasmModuleSummary {
   id: string;
   hash: string;
@@ -607,8 +646,12 @@ export interface WasmRuntimeCaptureResult {
   method?: string;
   url?: string;
   bodySnippet?: string;
+  bodyKind?: 'empty' | 'json' | 'urlencoded' | 'base64ish' | 'hexish' | 'plain-text' | 'unknown';
+  bodySegments?: WasmBodySegmentSummary[];
+  requestHeaders?: WasmHeaderPreview[];
   argsPreview?: string[];
   resultPreview?: string;
+  resultEntries?: WasmKeyValuePreviewSummary[];
   stackSummary?: string[];
   sideEffectHints?: string[];
   memory?: Array<{
@@ -646,6 +689,7 @@ export interface DetectWasmResult {
     runtimeEventsPath?: string;
     importsExportsPath?: string;
     boundaryReportPath?: string;
+    boundaryJsonPath?: string;
     binsDir?: string;
     analysisDir?: string;
   };
@@ -662,10 +706,15 @@ export interface WasmBoundaryChainResult {
   readerHints: string[];
   sinkHints: string[];
   candidateJsCallers: string[];
+  headerCandidates: WasmHeaderPreview[];
+  returnValueHints: WasmKeyValuePreviewSummary[];
+  bodyAnalysis?: WasmBodyPathSummary;
   networkTargets: Array<{
     method?: string;
     url?: string;
     bodySnippet?: string;
+    bodyKind?: 'empty' | 'json' | 'urlencoded' | 'base64ish' | 'hexish' | 'plain-text' | 'unknown';
+    requestHeaders?: WasmHeaderPreview[];
   }>;
   steps: Array<{
     type: WasmRuntimeCaptureResult['type'];
@@ -675,7 +724,27 @@ export interface WasmBoundaryChainResult {
     memoryExportName?: string;
     url?: string;
     method?: string;
+    bodySnippet?: string;
+    bodyKind?: 'empty' | 'json' | 'urlencoded' | 'base64ish' | 'hexish' | 'plain-text' | 'unknown';
+    requestHeaders?: WasmHeaderPreview[];
+    resultEntries?: WasmKeyValuePreviewSummary[];
     stackSummary?: string[];
+  }>;
+}
+
+export interface WasmSignatureDiffResultSummary {
+  moduleId: string;
+  exportName?: string;
+  sampleCount: number;
+  comparedChains: number;
+  observations: string[];
+  changedFields: Array<{
+    field: string;
+    location: 'url-query' | 'url-query-order' | 'body-segment' | 'request-header';
+    variationCount: number;
+    examples: string[];
+    impact: 'signature-candidate' | 'transport-only' | 'contextual';
+    notes: string;
   }>;
 }
 

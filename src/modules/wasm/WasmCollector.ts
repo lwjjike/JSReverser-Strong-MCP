@@ -114,9 +114,12 @@ function cloneRuntimeEvent(event: WasmRuntimeEvent): WasmRuntimeEvent {
     ...event,
     importKeys: event.importKeys ? [...event.importKeys] : undefined,
     exportKeys: event.exportKeys ? [...event.exportKeys] : undefined,
+    requestHeaders: event.requestHeaders ? event.requestHeaders.map((entry) => ({...entry})) : undefined,
+    bodySegments: event.bodySegments ? event.bodySegments.map((entry) => ({...entry})) : undefined,
     argsPreview: event.argsPreview ? [...event.argsPreview] : undefined,
     stackSummary: event.stackSummary ? [...event.stackSummary] : undefined,
     memory: event.memory ? event.memory.map((entry) => ({...entry})) : undefined,
+    resultEntries: event.resultEntries ? event.resultEntries.map((entry) => ({...entry})) : undefined,
     sideEffectHints: event.sideEffectHints ? [...event.sideEffectHints] : undefined,
   };
 }
@@ -412,6 +415,7 @@ export class WasmCollector {
     const runtimeEventsPath = path.join(rootDir, 'runtime-events.jsonl');
     const importsExportsPath = path.join(rootDir, 'imports-exports.json');
     const boundaryReportPath = path.join(rootDir, 'boundary-report.md');
+    const boundaryJsonPath = path.join(rootDir, 'boundary-report.json');
 
     await mkdir(binsDir, {recursive: true});
     await mkdir(analysisDir, {recursive: true});
@@ -442,6 +446,7 @@ export class WasmCollector {
     }
 
     const boundaryReport = this.runtimeInspector.buildBoundaryReport(modules, runtimeEvents);
+    const boundaryJson = this.runtimeInspector.buildStructuredBoundaryArtifact(modules, runtimeEvents);
     await writeFile(
       moduleIndexPath,
       `${JSON.stringify(modules.map((module) => ({...module, base64: undefined})), null, 2)}\n`,
@@ -468,6 +473,7 @@ export class WasmCollector {
       'utf8',
     );
     await writeFile(boundaryReportPath, `${boundaryReport}\n`, 'utf8');
+    await writeFile(boundaryJsonPath, `${JSON.stringify(boundaryJson, null, 2)}\n`, 'utf8');
 
     return {
       rootDir,
@@ -475,6 +481,7 @@ export class WasmCollector {
       runtimeEventsPath,
       importsExportsPath,
       boundaryReportPath,
+      boundaryJsonPath,
       binsDir,
       analysisDir,
     };
@@ -552,6 +559,150 @@ export class WasmCollector {
       return JSON.stringify(value).slice(0, 120);
     } catch {
       return '[unserializable]';
+    }
+  }
+
+  function maskSensitiveValue(value) {
+    if (typeof value !== 'string') {
+      return previewValue(value);
+    }
+    if (value.length <= 8) {
+      return value.slice(0, 2) + '***';
+    }
+    return value.slice(0, 4) + '***' + value.slice(-4);
+  }
+
+  function classifyBodyKind(value) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (!text) {
+      return 'empty';
+    }
+    if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
+      return 'json';
+    }
+    if (text.includes('=') && text.includes('&')) {
+      return 'urlencoded';
+    }
+    if (/^[0-9a-f]+$/i.test(text) && text.length >= 16) {
+      return 'hexish';
+    }
+    if (/^[A-Za-z0-9+/=_-]+$/.test(text) && text.length >= 16) {
+      return 'base64ish';
+    }
+    return 'plain-text';
+  }
+
+  function splitBodySegments(value, bodyKind) {
+    if (typeof value !== 'string' || value.length === 0) {
+      return [];
+    }
+    let parts;
+    if (bodyKind === 'json') {
+      try {
+        const parsed = JSON.parse(value);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          parts = Object.entries(parsed).map(([key, entryValue]) => key + '=' + previewValue(entryValue));
+        }
+      } catch {
+        parts = [value];
+      }
+    }
+    if (!parts && bodyKind === 'urlencoded') {
+      parts = value.split('&');
+    }
+    if (!parts && value.includes('.')) {
+      parts = value.split('.');
+    }
+    if (!parts && value.includes(':')) {
+      parts = value.split(':');
+    }
+    if (!parts) {
+      parts = [value];
+    }
+    return parts
+      .map((part, index) => {
+        const raw = String(part).trim();
+        if (!raw) {
+          return null;
+        }
+        const classification = classifyBodyKind(raw);
+        const likelySignatureMaterial =
+          /(sign|signature|token|nonce|digest)/i.test(raw) ||
+          classification === 'hexish' ||
+          classification === 'base64ish';
+        return {
+          index,
+          raw,
+          displayValue: likelySignatureMaterial ? maskSensitiveValue(raw) : raw,
+          classification: /^[0-9]+$/.test(raw) ? 'numeric' : classification,
+          likelySignatureMaterial,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function normalizeHeaderEntries(headers) {
+    try {
+      if (!headers) {
+        return [];
+      }
+      const entries = [];
+      if (headers instanceof Headers) {
+        for (const [name, value] of headers.entries()) {
+          entries.push([name, value]);
+        }
+      } else if (Array.isArray(headers)) {
+        for (const entry of headers) {
+          if (Array.isArray(entry) && entry.length >= 2) {
+            entries.push([String(entry[0]), String(entry[1])]);
+          }
+        }
+      } else if (typeof headers === 'object') {
+        for (const [name, value] of Object.entries(headers)) {
+          entries.push([String(name), Array.isArray(value) ? value.join(', ') : String(value)]);
+        }
+      }
+      return entries.slice(0, 20).map(([name, value]) => {
+        const masked = /(authorization|signature|token|secret|key|cookie)/i.test(name) || String(value).length >= 24;
+        return {
+          name,
+          value: masked ? maskSensitiveValue(String(value)) : previewValue(value),
+          masked,
+        };
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  function previewEntries(value) {
+    try {
+      if (value instanceof Map) {
+        return Array.from(value.entries()).slice(0, 12).map(([key, entryValue]) => {
+          const keyText = String(key);
+          const valueText = previewValue(entryValue);
+          const masked = /(authorization|signature|token|secret|key|cookie)/i.test(keyText);
+          return {
+            key: keyText,
+            value: masked ? maskSensitiveValue(valueText) : valueText,
+            masked,
+          };
+        });
+      }
+      if (value && typeof value === 'object' && !ArrayBuffer.isView(value) && !(value instanceof ArrayBuffer)) {
+        return Object.entries(value).slice(0, 12).map(([key, entryValue]) => {
+          const valueText = previewValue(entryValue);
+          const masked = /(authorization|signature|token|secret|key|cookie)/i.test(key);
+          return {
+            key,
+            value: masked ? maskSensitiveValue(valueText) : valueText,
+            masked,
+          };
+        });
+      }
+      return [];
+    } catch {
+      return [];
     }
   }
 
@@ -813,6 +964,7 @@ export class WasmCollector {
           exportName: name,
           argsPreview: args.map((item) => previewValue(item)).slice(0, 6),
           resultPreview: previewValue(result),
+          resultEntries: previewEntries(result),
           stackSummary: takeStack(),
           sideEffectHints: exportCallHints(args, result, instance),
         });
@@ -1058,6 +1210,13 @@ export class WasmCollector {
           (input && typeof input.method === 'string' ? input.method : undefined) ||
           'GET';
         const requestBody = init ? init.body : undefined;
+        const requestHeaders = normalizeHeaderEntries(
+          init && init.headers
+            ? init.headers
+            : (input && typeof input.headers === 'object' ? input.headers : undefined),
+        );
+        const bodySnippet = previewValue(requestBody);
+        const bodyKind = classifyBodyKind(typeof requestBody === 'string' ? requestBody : bodySnippet);
         const context = inferRuntimeContext(requestBody);
         if (context) {
           setLastWasmActivity(context.runtimeModuleId, context.exportName);
@@ -1065,11 +1224,15 @@ export class WasmCollector {
         recordBridgeEvent('network_request', context, {
           method: requestMethod,
           url: requestUrl,
-          bodySnippet: previewValue(requestBody),
+          bodySnippet,
+          bodyKind,
+          bodySegments: splitBodySegments(typeof requestBody === 'string' ? requestBody : bodySnippet, bodyKind),
+          requestHeaders,
           sideEffectHints: [
             'fetch',
+            bodyKind !== 'empty' ? 'body-observed' : undefined,
             ...(context ? ['post-wasm-activity'] : []),
-          ],
+          ].filter(Boolean),
         });
         return original.fetch.apply(this, arguments);
       };
@@ -1080,8 +1243,18 @@ export class WasmCollector {
       if (typeof proto.open === 'function') {
         const originalOpen = proto.open;
         proto.open = function (method, url) {
-          xhrState.set(this, {method, url});
+          xhrState.set(this, {method, url, headers: []});
           return originalOpen.apply(this, arguments);
+        };
+      }
+      if (typeof proto.setRequestHeader === 'function') {
+        const originalSetRequestHeader = proto.setRequestHeader;
+        proto.setRequestHeader = function (name, value) {
+          const info = xhrState.get(this) || {headers: []};
+          info.headers = info.headers || [];
+          info.headers.push([String(name), String(value)]);
+          xhrState.set(this, info);
+          return originalSetRequestHeader.apply(this, arguments);
         };
       }
       if (typeof proto.send === 'function') {
@@ -1089,17 +1262,23 @@ export class WasmCollector {
         proto.send = function (body) {
           const info = xhrState.get(this) || {};
           const context = inferRuntimeContext(body);
+          const bodySnippet = previewValue(body);
+          const bodyKind = classifyBodyKind(typeof body === 'string' ? body : bodySnippet);
           if (context) {
             setLastWasmActivity(context.runtimeModuleId, context.exportName);
           }
           recordBridgeEvent('network_request', context, {
             method: info.method || 'GET',
             url: info.url,
-            bodySnippet: previewValue(body),
+            bodySnippet,
+            bodyKind,
+            bodySegments: splitBodySegments(typeof body === 'string' ? body : bodySnippet, bodyKind),
+            requestHeaders: normalizeHeaderEntries(info.headers),
             sideEffectHints: [
               'xhr',
+              bodyKind !== 'empty' ? 'body-observed' : undefined,
               ...(context ? ['post-wasm-activity'] : []),
-            ],
+            ].filter(Boolean),
           });
           return originalSend.apply(this, arguments);
         };

@@ -39,6 +39,24 @@ export type WasmRuntimeEventType =
   | 'text_decode'
   | 'network_request';
 
+export type WasmStringCategory =
+  | 'header-like'
+  | 'url-like'
+  | 'json-like'
+  | 'key-material'
+  | 'base64-like'
+  | 'hex-like'
+  | 'plain-text';
+
+export type WasmBodyKind =
+  | 'empty'
+  | 'json'
+  | 'urlencoded'
+  | 'base64ish'
+  | 'hexish'
+  | 'plain-text'
+  | 'unknown';
+
 export interface WasmSectionSummary {
   id: number;
   name: string;
@@ -94,6 +112,71 @@ export interface WasmFunctionFingerprint {
   reason: string;
 }
 
+export interface WasmStringSlot {
+  offset: number;
+  length: number;
+  source: 'data-segment' | 'binary-run';
+  segmentIndex?: number;
+  category: WasmStringCategory;
+  value: string;
+  displayValue: string;
+  masked: boolean;
+}
+
+export interface WasmDataSegmentSummary {
+  index: number;
+  mode: 'active' | 'passive' | 'active-with-memory-index' | 'unknown';
+  size: number;
+  offset?: number;
+  stringSlots: WasmStringSlot[];
+}
+
+export interface WasmHeaderEntry {
+  name: string;
+  value: string;
+  masked?: boolean;
+}
+
+export interface WasmKeyValuePreview {
+  key: string;
+  value: string;
+  masked?: boolean;
+}
+
+export interface WasmBodySegmentHint {
+  index: number;
+  raw: string;
+  displayValue: string;
+  classification: WasmBodyKind | 'numeric';
+  likelySignatureMaterial: boolean;
+}
+
+export interface WasmBodyPathAnalysis {
+  bodyKind: WasmBodyKind;
+  segments: WasmBodySegmentHint[];
+  hints: string[];
+  candidateWriters: string[];
+  candidateReaders: string[];
+}
+
+export interface WasmSignatureDiffFieldChange {
+  field: string;
+  location: 'url-query' | 'url-query-order' | 'body-segment' | 'request-header';
+  variationCount: number;
+  examples: string[];
+  impact: 'signature-candidate' | 'transport-only' | 'contextual';
+  notes: string;
+}
+
+export interface WasmSignatureDiffResult {
+  moduleId: string;
+  exportName?: string;
+  sampleCount: number;
+  comparedChains: number;
+  observations: string[];
+  changedFields: WasmSignatureDiffFieldChange[];
+}
+
 export interface WasmRuntimeEvent {
   id: string;
   type: WasmRuntimeEventType;
@@ -113,8 +196,12 @@ export interface WasmRuntimeEvent {
   method?: string;
   url?: string;
   bodySnippet?: string;
+  bodyKind?: WasmBodyKind;
+  bodySegments?: WasmBodySegmentHint[];
+  requestHeaders?: WasmHeaderEntry[];
   argsPreview?: string[];
   resultPreview?: string;
+  resultEntries?: WasmKeyValuePreview[];
   stackSummary?: string[];
   memory?: WasmMemoryInfo[];
   sideEffectHints?: string[];
@@ -128,6 +215,10 @@ export interface WasmBoundaryStep {
   memoryExportName?: string;
   url?: string;
   method?: string;
+  bodySnippet?: string;
+  bodyKind?: WasmBodyKind;
+  requestHeaders?: WasmHeaderEntry[];
+  resultEntries?: WasmKeyValuePreview[];
   stackSummary?: string[];
 }
 
@@ -142,10 +233,15 @@ export interface WasmBoundaryChain {
   readerHints: string[];
   sinkHints: string[];
   candidateJsCallers: string[];
+  headerCandidates: WasmHeaderEntry[];
+  returnValueHints: WasmKeyValuePreview[];
+  bodyAnalysis?: WasmBodyPathAnalysis;
   networkTargets: Array<{
     method?: string;
     url?: string;
     bodySnippet?: string;
+    bodyKind?: WasmBodyKind;
+    requestHeaders?: WasmHeaderEntry[];
   }>;
   steps: WasmBoundaryStep[];
 }
@@ -208,6 +304,7 @@ export interface WasmDetectionResult {
     runtimeEventsPath?: string;
     importsExportsPath?: string;
     boundaryReportPath?: string;
+    boundaryJsonPath?: string;
     binsDir?: string;
     analysisDir?: string;
   };
@@ -216,6 +313,9 @@ export interface WasmDetectionResult {
 export interface WasmAnalysisOptions {
   includeFunctionSignatures?: boolean;
   includeRawSectionMap?: boolean;
+  includeStringScan?: boolean;
+  maskSensitiveStrings?: boolean;
+  maxStringSlots?: number;
   maxSummaryLines?: number;
 }
 
@@ -236,6 +336,10 @@ export interface WasmAnalysisResult {
   typeCount: number;
   codeBodyCount: number;
   startFunctionIndex?: number;
+  dataSegments: WasmDataSegmentSummary[];
+  stringSlots: WasmStringSlot[];
+  headerCandidates: WasmStringSlot[];
+  keyMaterialCandidates: WasmStringSlot[];
   styleHints: string[];
   purposeHints: string[];
   riskTags: string[];

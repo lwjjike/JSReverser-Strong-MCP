@@ -1,5 +1,24 @@
 # JS Reverse Strong MCP
 
+## 安装与使用
+1. 下载右侧Release版本中7z文件并进行解压
+2. VSCode插件库中搜索`codex`，安装`Codex – OpenAI’s coding agent`插件
+![安装codex](docs/1.png)
+3. 打开codex插件面板，点击右上角`设置图标`->`MCP设置`->`打开config.toml`
+![打开配置文件](docs/2.png)
+4. 添加如下配置
+```toml
+[mcp_servers.js-reverse]
+command = "node"
+args = ["你本地的路径/JSReverser-MCP/build/src/index.js"]
+```
+5. 重启VSCode，在codex插件面板下方空白聊天框中输入"/"，点击`MCP 显示MCP服务器状态`
+![显示MCP服务器状态](docs/3.png)
+6. 观察MCP列表中是否有js-reverse，有则说明安装成功
+![js-reverse](docs/4.png)
+7. 使用
+输入提示词，让Ai自己理解并触发MCP工具
+
 [English README](README.en.md)
 
 一个把前端 JavaScript 逆向流程标准化的 MCP 服务。  

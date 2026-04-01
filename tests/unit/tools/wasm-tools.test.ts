@@ -10,6 +10,7 @@ import type {WasmAnalysisResult, WasmModuleRecord, WasmRuntimeEvent} from '../..
 import {getJSHookRuntime} from '../../../src/tools/runtime.js';
 import {
   analyzeWasmModule,
+  analyzeWasmSignatureDiff,
   collectWasm,
   decompileWasmModule,
   inspectWasmExports,
@@ -62,6 +63,7 @@ describe('wasm tools', () => {
         summarizeExports: RuntimeMethod;
         summarizeBoundary: RuntimeMethod;
         buildBoundaryChains: RuntimeMethod;
+        analyzeSignatureDiff: RuntimeMethod;
       };
       wasmDecompiler: {
         decompile: RuntimeMethod;
@@ -110,6 +112,13 @@ describe('wasm tools', () => {
         moduleId: 'wasm_test',
         runtimeModuleId: 'rtm_1',
         exportKeys: ['sign'],
+        requestHeaders: [
+          {
+            name: 'x-itouchtv-ca-signature',
+            value: 'abcd***wxyz',
+            masked: true,
+          },
+        ],
       },
     ];
     const analysis: WasmAnalysisResult = {
@@ -128,6 +137,10 @@ describe('wasm tools', () => {
       dataSegmentCount: 0,
       typeCount: 1,
       codeBodyCount: 1,
+      dataSegments: [],
+      stringSlots: [],
+      headerCandidates: [],
+      keyMaterialCandidates: [],
       styleHints: moduleRecord.styleHints,
       purposeHints: moduleRecord.purposeHints,
       riskTags: moduleRecord.riskTags,
@@ -146,6 +159,7 @@ describe('wasm tools', () => {
       summarizeExports: runtime.wasmRuntimeInspector.summarizeExports,
       summarizeBoundary: runtime.wasmRuntimeInspector.summarizeBoundary,
       buildBoundaryChains: runtime.wasmRuntimeInspector.buildBoundaryChains,
+      analyzeSignatureDiff: runtime.wasmRuntimeInspector.analyzeSignatureDiff,
       decompile: runtime.wasmDecompiler.decompile,
     };
 
@@ -196,7 +210,42 @@ describe('wasm tools', () => {
           readerHints: ['TextDecoder <- Uint8Array'],
           sinkHints: ['POST https://example.com/api/sign'],
           candidateJsCallers: ['glue.js:10:1'],
-          networkTargets: [{method: 'POST', url: 'https://example.com/api/sign', bodySnippet: '{"sign":"abc"}'}],
+          headerCandidates: [
+            {
+              name: 'x-itouchtv-ca-signature',
+              value: 'abcd***wxyz',
+              masked: true,
+            },
+          ],
+          returnValueHints: [],
+          bodyAnalysis: {
+            bodyKind: 'json',
+            segments: [
+              {
+                index: 0,
+                raw: '{"sign":"abc"}',
+                displayValue: '{"sign":"abc"}',
+                classification: 'json',
+                likelySignatureMaterial: false,
+              },
+            ],
+            hints: ['body-kind:json'],
+            candidateWriters: ['{"sign":"abc"}'],
+            candidateReaders: [],
+          },
+          networkTargets: [{
+            method: 'POST',
+            url: 'https://example.com/api/sign',
+            bodySnippet: '{"sign":"abc"}',
+            bodyKind: 'json',
+            requestHeaders: [
+              {
+                name: 'x-itouchtv-ca-signature',
+                value: 'abcd***wxyz',
+                masked: true,
+              },
+            ],
+          }],
           steps: [],
         },
       ],
@@ -213,7 +262,42 @@ describe('wasm tools', () => {
         readerHints: ['TextDecoder <- Uint8Array'],
         sinkHints: ['POST https://example.com/api/sign'],
         candidateJsCallers: ['glue.js:10:1'],
-        networkTargets: [{method: 'POST', url: 'https://example.com/api/sign', bodySnippet: '{"sign":"abc"}'}],
+        headerCandidates: [
+          {
+            name: 'x-itouchtv-ca-signature',
+            value: 'abcd***wxyz',
+            masked: true,
+          },
+        ],
+        returnValueHints: [],
+        bodyAnalysis: {
+          bodyKind: 'json',
+          segments: [
+            {
+              index: 0,
+              raw: '{"sign":"abc"}',
+              displayValue: '{"sign":"abc"}',
+              classification: 'json',
+              likelySignatureMaterial: false,
+            },
+          ],
+          hints: ['body-kind:json'],
+          candidateWriters: ['{"sign":"abc"}'],
+          candidateReaders: [],
+        },
+        networkTargets: [{
+          method: 'POST',
+          url: 'https://example.com/api/sign',
+          bodySnippet: '{"sign":"abc"}',
+          bodyKind: 'json',
+          requestHeaders: [
+            {
+              name: 'x-itouchtv-ca-signature',
+              value: 'abcd***wxyz',
+              masked: true,
+            },
+          ],
+        }],
         steps: [
           {
             type: 'export_call',
@@ -224,6 +308,23 @@ describe('wasm tools', () => {
         ],
       },
     ]) as RuntimeMethod;
+    runtime.wasmRuntimeInspector.analyzeSignatureDiff = (() => ({
+      moduleId: 'wasm_test',
+      exportName: 'sign',
+      sampleCount: 2,
+      comparedChains: 2,
+      observations: ['signature header changes with runtime input'],
+      changedFields: [
+        {
+          field: 'x-itouchtv-ca-signature',
+          location: 'request-header',
+          variationCount: 2,
+          examples: ['abcd***wxyz', 'wxyz***abcd'],
+          impact: 'signature-candidate',
+          notes: 'Header value shifts look consistent with runtime signature generation.',
+        },
+      ],
+    })) as RuntimeMethod;
     runtime.wasmDecompiler.decompile = (async () => ({
       moduleId: 'wasm_test',
       hash: 'hash',
@@ -268,6 +369,10 @@ describe('wasm tools', () => {
       await invokeTool(summarizeWasmBoundary as unknown as ToolDefinitionHarness, {
         moduleId: 'wasm_test',
       }, response);
+      await invokeTool(analyzeWasmSignatureDiff as unknown as ToolDefinitionHarness, {
+        moduleId: 'wasm_test',
+        exportName: 'sign',
+      }, response);
       await invokeTool(decompileWasmModule as unknown as ToolDefinitionHarness, {
         moduleId: 'wasm_test',
         maxWatChars: 100,
@@ -282,6 +387,7 @@ describe('wasm tools', () => {
       assert.ok(output.includes('"exportSummary"'));
       assert.ok(output.includes('"topExports"'));
       assert.ok(output.includes('"chainCount": 1'));
+      assert.ok(output.includes('"changedFields"'));
       assert.ok(output.includes('"wat": "(module'));
     } finally {
       runtime.wasmCollector.collect = originals.collect;
@@ -294,6 +400,7 @@ describe('wasm tools', () => {
       runtime.wasmRuntimeInspector.summarizeExports = originals.summarizeExports;
       runtime.wasmRuntimeInspector.summarizeBoundary = originals.summarizeBoundary;
       runtime.wasmRuntimeInspector.buildBoundaryChains = originals.buildBoundaryChains;
+      runtime.wasmRuntimeInspector.analyzeSignatureDiff = originals.analyzeSignatureDiff;
       runtime.wasmDecompiler.decompile = originals.decompile;
     }
   });

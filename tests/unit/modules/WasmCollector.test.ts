@@ -76,7 +76,40 @@ describe('WasmCollector', () => {
           timestamp: 3,
           runtimeModuleId: 'rtm_2',
           exportName: 'sign',
+          resultEntries: [
+            {
+              key: 'x-itouchtv-ca-signature',
+              value: 'abcd***wxyz',
+              masked: true,
+            },
+          ],
           sideEffectHints: ['memory-bridge'],
+        },
+        {
+          id: 'evt_sink',
+          type: 'network_request',
+          timestamp: 4,
+          runtimeModuleId: 'rtm_2',
+          method: 'POST',
+          url: 'https://example.com/api/sign?ts=1',
+          bodySnippet: 'payload=abcd1234',
+          bodyKind: 'urlencoded',
+          bodySegments: [
+            {
+              index: 0,
+              raw: 'payload=abcd1234',
+              displayValue: 'payload=abcd1234',
+              classification: 'urlencoded',
+              likelySignatureMaterial: false,
+            },
+          ],
+          requestHeaders: [
+            {
+              name: 'x-itouchtv-ca-signature',
+              value: 'abcd***wxyz',
+              masked: true,
+            },
+          ],
         },
       ],
     });
@@ -101,5 +134,8 @@ describe('WasmCollector', () => {
     assert.deepStrictEqual(result.modules[0]?.loadMethods.sort(), ['compile', 'instantiate']);
     assert.strictEqual(result.runtimeEvents[1]?.moduleId, result.modules[0]?.id);
     assert.deepStrictEqual(result.runtimeEvents[1]?.sideEffectHints, ['memory-bridge']);
+    assert.strictEqual(result.runtimeEvents[2]?.bodyKind, 'urlencoded');
+    assert.strictEqual(result.runtimeEvents[2]?.requestHeaders?.[0]?.name, 'x-itouchtv-ca-signature');
+    assert.strictEqual(result.runtimeEvents[1]?.resultEntries?.[0]?.key, 'x-itouchtv-ca-signature');
   });
 });

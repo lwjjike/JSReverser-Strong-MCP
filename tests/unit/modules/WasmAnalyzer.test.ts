@@ -19,6 +19,21 @@ const SIMPLE_WASM = Uint8Array.from([
   0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,
 ]);
 
+function buildDataOnlyWasm(dataText: string): Uint8Array {
+  const data = Buffer.from(dataText, 'utf8');
+  const exportPayload = [0x01, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00];
+  const dataPayload = [0x01, 0x00, 0x41, 0x00, 0x0b, data.length, ...data];
+  return Uint8Array.from([
+    0x00, 0x61, 0x73, 0x6d,
+    0x01, 0x00, 0x00, 0x00,
+    0x05, 0x03, 0x01, 0x00, 0x01,
+    0x07, exportPayload.length, ...exportPayload,
+    0x0b, dataPayload.length, ...dataPayload,
+  ]);
+}
+
+const DATA_WASM = buildDataOnlyWasm('x-itouchtv-ca-signature\0secretKeyValue1234567890\0/api/channel/v1/news');
+
 describe('WasmAnalyzer', () => {
   it('parses core sections and exported functions', () => {
     const analyzer = new WasmAnalyzer();
@@ -42,6 +57,27 @@ describe('WasmAnalyzer', () => {
     );
     assert.strictEqual(analysis.exports[0]?.name, 'sign');
     assert.ok(analysis.summaryLines.some((line) => line.includes('Functions: 1 total')));
+  });
+
+  it('scans data segments for header-like and key-like strings', () => {
+    const analyzer = new WasmAnalyzer();
+    const analysis = analyzer.analyzeRecord(
+      {
+        id: 'wasm_data',
+        hash: 'hash_data',
+        size: DATA_WASM.byteLength,
+      },
+      DATA_WASM,
+      {
+        includeStringScan: true,
+        maxStringSlots: 20,
+      },
+    );
+
+    assert.ok(analysis.headerCandidates.some((entry) => entry.value.includes('x-itouchtv-ca-signature')));
+    assert.ok(analysis.keyMaterialCandidates.some((entry) => entry.value.includes('secretKeyValue')));
+    assert.ok(analysis.keyMaterialCandidates.some((entry) => entry.masked));
+    assert.ok(analysis.summaryLines.some((line) => line.includes('String slots:')));
   });
 
   it('summarizes export usage and boundary hints', () => {
